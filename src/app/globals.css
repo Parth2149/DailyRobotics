@@ -1,26 +1,75 @@
 @import "tailwindcss";
 
+@theme {
+  --color-brand-cyan: #00d2ff;
+  --color-brand-blue: #0088ff;
+  --color-dark-bg: #000000;
+  --color-glass-bg: rgba(5, 5, 5, 0.8);
+  --color-glass-border: rgba(0, 210, 255, 0.1);
+}
+
 :root {
-  --background: #ffffff;
-  --foreground: #171717;
-}
-
-@theme inline {
-  --color-background: var(--background);
-  --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
-}
-
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-  }
+  --background: #000000;
+  --foreground: #f8fafc;
 }
 
 body {
-  background: var(--background);
+  background-color: var(--background);
   color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+  font-family: 'Outfit', 'Inter', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  min-height: 100vh;
+  overflow-x: hidden;
+}
+
+/* Glassmorphism styling in deep black and shiny sky blue border */
+.glass-panel {
+  background: rgba(5, 5, 5, 0.75);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  border: 1px solid rgba(0, 210, 255, 0.08);
+}
+
+/* Animated glowing sky blue accent borders */
+.glow-border-cyan {
+  border: 1px solid rgba(0, 210, 255, 0.15);
+  box-shadow: 0 0 15px rgba(0, 210, 255, 0.03);
+  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+}
+.glow-border-cyan:hover {
+  border-color: rgba(0, 210, 255, 0.45);
+  box-shadow: 0 0 25px rgba(0, 210, 255, 0.12);
+}
+
+.glow-border-blue {
+  border: 1px solid rgba(0, 136, 255, 0.15);
+  box-shadow: 0 0 15px rgba(0, 136, 255, 0.03);
+  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+}
+.glow-border-blue:hover {
+  border-color: rgba(0, 136, 255, 0.45);
+  box-shadow: 0 0 25px rgba(0, 136, 255, 0.12);
+}
+
+/* Custom scrollbars with sky blue touch */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+::-webkit-scrollbar-track {
+  background: rgba(0, 0, 0, 0.9);
+}
+::-webkit-scrollbar-thumb {
+  background: rgba(0, 210, 255, 0.15);
+  border-radius: 9999px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: rgba(0, 210, 255, 0.35);
+}
+
+/* Cyber grid background decoration with sky blue lines */
+.bg-grid-pattern {
+  background-size: 40px 40px;
+  background-image: 
+    linear-gradient(to right, rgba(0, 210, 255, 0.015) 1px, transparent 1px),
+    linear-gradient(to bottom, rgba(0, 210, 255, 0.015) 1px, transparent 1px);
 }
