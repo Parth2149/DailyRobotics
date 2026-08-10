@@ -3,18 +3,23 @@
 @theme {
   --color-brand-cyan: #00d2ff;
   --color-brand-blue: #0088ff;
-  --color-dark-bg: #000000;
-  --color-glass-bg: rgba(5, 5, 5, 0.8);
-  --color-glass-border: rgba(0, 210, 255, 0.1);
+  --color-dark-bg: #020617;
+  --color-glass-bg: rgba(3, 7, 18, 0.7);
+  --color-glass-border: rgba(0, 210, 255, 0.15);
 }
 
 :root {
-  --background: #000000;
+  --background: #020617;
   --foreground: #f8fafc;
 }
 
 body {
   background-color: var(--background);
+  background-image: 
+    radial-gradient(circle at 50% 10%, rgba(0, 210, 255, 0.45) 0%, transparent 65%),
+    radial-gradient(circle at 15% 25%, rgba(0, 136, 255, 0.25) 0%, transparent 50%),
+    linear-gradient(to bottom, #001a35, #020617);
+  background-attachment: fixed;
   color: var(--foreground);
   font-family: 'Outfit', 'Inter', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
   min-height: 100vh;
@@ -23,31 +28,32 @@ body {
 
 /* Glassmorphism styling in deep black and shiny sky blue border */
 .glass-panel {
-  background: rgba(5, 5, 5, 0.75);
+  background: rgba(3, 7, 18, 0.75);
   backdrop-filter: blur(16px);
   -webkit-backdrop-filter: blur(16px);
-  border: 1px solid rgba(0, 210, 255, 0.08);
+  border: 1px solid rgba(0, 210, 255, 0.12);
+  box-shadow: 0 10px 40px -10px rgba(0, 210, 255, 0.08);
 }
 
 /* Animated glowing sky blue accent borders */
 .glow-border-cyan {
-  border: 1px solid rgba(0, 210, 255, 0.15);
-  box-shadow: 0 0 15px rgba(0, 210, 255, 0.03);
+  border: 1px solid rgba(0, 210, 255, 0.2);
+  box-shadow: 0 0 20px rgba(0, 210, 255, 0.04);
   transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
 }
 .glow-border-cyan:hover {
-  border-color: rgba(0, 210, 255, 0.45);
-  box-shadow: 0 0 25px rgba(0, 210, 255, 0.12);
+  border-color: rgba(0, 210, 255, 0.5);
+  box-shadow: 0 0 30px rgba(0, 210, 255, 0.15);
 }
 
 .glow-border-blue {
-  border: 1px solid rgba(0, 136, 255, 0.15);
-  box-shadow: 0 0 15px rgba(0, 136, 255, 0.03);
+  border: 1px solid rgba(0, 136, 255, 0.2);
+  box-shadow: 0 0 20px rgba(0, 136, 255, 0.04);
   transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
 }
 .glow-border-blue:hover {
-  border-color: rgba(0, 136, 255, 0.45);
-  box-shadow: 0 0 25px rgba(0, 136, 255, 0.12);
+  border-color: rgba(0, 136, 255, 0.55);
+  box-shadow: 0 0 30px rgba(0, 136, 255, 0.15);
 }
 
 /* Custom scrollbars with sky blue touch */
@@ -56,20 +62,20 @@ body {
   height: 6px;
 }
 ::-webkit-scrollbar-track {
-  background: rgba(0, 0, 0, 0.9);
+  background: rgba(2, 6, 23, 0.9);
 }
 ::-webkit-scrollbar-thumb {
-  background: rgba(0, 210, 255, 0.15);
+  background: rgba(0, 210, 255, 0.25);
   border-radius: 9999px;
 }
 ::-webkit-scrollbar-thumb:hover {
-  background: rgba(0, 210, 255, 0.35);
+  background: rgba(0, 210, 255, 0.45);
 }
 
 /* Cyber grid background decoration with sky blue lines */
 .bg-grid-pattern {
   background-size: 40px 40px;
   background-image: 
-    linear-gradient(to right, rgba(0, 210, 255, 0.015) 1px, transparent 1px),
-    linear-gradient(to bottom, rgba(0, 210, 255, 0.015) 1px, transparent 1px);
+    linear-gradient(to right, rgba(0, 210, 255, 0.02) 1px, transparent 1px),
+    linear-gradient(to bottom, rgba(0, 210, 255, 0.02) 1px, transparent 1px);
 }
