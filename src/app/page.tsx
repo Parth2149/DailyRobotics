@@ -618,8 +618,13 @@ export default function Dashboard() {
                     <textarea
                       value={xText}
                       onChange={(e) => setEditedX(prev => ({ ...prev, [post.id]: e.target.value }))}
-                      className="w-full h-24 p-3 text-xs bg-slate-950 border border-slate-800 rounded-xl text-slate-200 focus:outline-none focus:border-brand-cyan transition-colors resize-none leading-relaxed"
+                      className={`w-full h-24 p-3 text-xs bg-slate-950 border ${isOverLimit ? 'border-rose-500/50 focus:border-rose-500' : 'border-slate-800 focus:border-brand-cyan'} rounded-xl text-slate-200 focus:outline-none transition-colors resize-none leading-relaxed`}
                     />
+                    {isOverLimit && (
+                      <p className="text-[10px] font-semibold text-rose-400 mt-0.5">
+                        ⚠️ Warning: Exceeds X's 280-character limit. Please shorten it to publish.
+                      </p>
+                    )}
                   </div>
 
                   {/* Reddit Textarea */}
@@ -699,8 +704,9 @@ export default function Dashboard() {
                     {/* X Publish Button */}
                     <button
                       onClick={() => handlePublishX(post)}
-                      disabled={isPublishingXField}
-                      className="py-2.5 px-3 rounded-xl bg-slate-100 hover:bg-white text-slate-950 font-bold text-xs flex items-center justify-center gap-1.5 transition-all shadow-md shadow-slate-100/10 disabled:opacity-50"
+                      disabled={isPublishingXField || isOverLimit}
+                      className={`py-2.5 px-3 rounded-xl bg-slate-100 hover:bg-white text-slate-950 font-bold text-xs flex items-center justify-center gap-1.5 transition-all shadow-md shadow-slate-100/10 ${isOverLimit ? 'opacity-40 cursor-not-allowed' : 'disabled:opacity-50'}`}
+                      title={isOverLimit ? 'Cannot publish: text exceeds 280 character limit' : 'Publish to X'}
                     >
                       {isPublishingXField ? (
                         <Loader2 className="w-3.5 h-3.5 animate-spin text-slate-950" />
@@ -740,6 +746,9 @@ export default function Dashboard() {
                 const isSaving = savingPost[post.id] || false;
                 const isPublishingR = publishingReddit[post.id] || false;
                 const isPublishingXField = publishingX[post.id] || false;
+
+                const charCount = getXCharCount(xText);
+                const isOverLimit = isXCountOverLimit(xText);
 
                 // Determine platform publish status badges
                 const postedToX = post.status === 'POSTED_X' || post.status === 'POSTED_BOTH';
@@ -786,14 +795,24 @@ export default function Dashboard() {
                     <div className="flex flex-col gap-3">
                       {/* X Post Input */}
                       <div className="flex flex-col gap-1.5">
-                        <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider flex items-center gap-1">
-                          <XIcon className="w-3.5 h-3.5 text-white" /> X (Twitter) draft
-                        </span>
+                        <div className="flex items-center justify-between">
+                          <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider flex items-center gap-1">
+                            <XIcon className="w-3.5 h-3.5 text-white" /> X (Twitter) draft
+                          </span>
+                          <span className={`text-[9px] font-bold font-mono px-1.5 py-0.5 rounded ${isOverLimit ? 'bg-rose-500/20 text-rose-400' : 'bg-slate-900 text-slate-400'}`}>
+                            {charCount} / 280
+                          </span>
+                        </div>
                         <textarea
                           value={xText}
                           onChange={(e) => setEditedX(prev => ({ ...prev, [post.id]: e.target.value }))}
-                          className="w-full h-20 p-2.5 text-[11px] bg-slate-950 border border-slate-800 rounded-xl text-slate-300 focus:outline-none focus:border-brand-cyan transition-colors resize-none leading-relaxed"
+                          className={`w-full h-20 p-2.5 text-[11px] bg-slate-950 border ${isOverLimit ? 'border-rose-500/50 focus:border-rose-500' : 'border-slate-800 focus:border-brand-cyan'} rounded-xl text-slate-300 focus:outline-none transition-colors resize-none leading-relaxed`}
                         />
+                        {isOverLimit && (
+                          <p className="text-[9px] font-semibold text-rose-400 mt-0.5">
+                            ⚠️ Warning: Exceeds X's 280-character limit. Please shorten it to publish.
+                          </p>
+                        )}
                       </div>
 
                       {/* Reddit Post Input */}
@@ -845,8 +864,9 @@ export default function Dashboard() {
                         </button>
                         <button
                           onClick={() => handlePublishX(post)}
-                          disabled={isPublishingXField}
-                          className="py-2 px-3 rounded-xl bg-slate-100 hover:bg-white text-slate-950 font-bold text-xs flex items-center justify-center gap-1.5 transition-all shadow-md shadow-slate-100/10 disabled:opacity-50"
+                          disabled={isPublishingXField || isOverLimit}
+                          className={`py-2 px-3 rounded-xl bg-slate-100 hover:bg-white text-slate-950 font-bold text-xs flex items-center justify-center gap-1.5 transition-all shadow-md shadow-slate-100/10 ${isOverLimit ? 'opacity-40 cursor-not-allowed' : 'disabled:opacity-50'}`}
+                          title={isOverLimit ? 'Cannot publish: text exceeds 280 character limit' : 'Re-Send to X'}
                         >
                           {isPublishingXField ? (
                             <Loader2 className="w-3 h-3 animate-spin text-slate-950" />
