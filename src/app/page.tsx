@@ -144,6 +144,7 @@ export default function Dashboard() {
   // Quick Digest Extractor states
   const [extractSection, setExtractSection] = useState('Latest News & Major Developments');
   const [extractPostNum, setExtractPostNum] = useState(1);
+  const [fullDigestText, setFullDigestText] = useState('');
   
   // Web Share fallback modal state (supports both X and Reddit direct sharing)
   const [fallbackModal, setFallbackModal] = useState<{
@@ -288,6 +289,7 @@ export default function Dashboard() {
   // 3.8 Load an Inbox post into the Webhook Simulator
   const handleLoadIntoSimulator = async (post: Post) => {
     setSimText(post.raw_spark_text);
+    setFullDigestText(post.raw_spark_text);
     setShowSimulator(true);
     
     // Silently delete the inbox post from the database
@@ -303,12 +305,17 @@ export default function Dashboard() {
 
   // 3.9 Extract a specific post from the raw email digest text currently in the simulator
   const handleExtractPost = () => {
-    if (!simText) {
+    const sourceText = fullDigestText || simText;
+    if (!sourceText) {
       alert('Please paste the daily digest email text into the simulator text box first!');
       return;
     }
-    const extracted = extractPostFromDigest(simText, extractSection, extractPostNum);
+    const extracted = extractPostFromDigest(sourceText, extractSection, extractPostNum);
     if (extracted) {
+      // Preserve full text in cache if they extract from raw input directly
+      if (!fullDigestText) {
+        setFullDigestText(simText);
+      }
       setSimText(extracted);
       console.log(`[Extractor] Extracted post ${extractPostNum} from "${extractSection}" successfully.`);
     } else {
@@ -574,7 +581,10 @@ export default function Dashboard() {
               <label className="text-[10px] font-bold uppercase text-slate-400 tracking-wider">Simulate Spark Webhook Payload</label>
               <textarea
                 value={simText}
-                onChange={(e) => setSimText(e.target.value)}
+                onChange={(e) => {
+                  setSimText(e.target.value);
+                  setFullDigestText(e.target.value); // Sync full text cache on manual paste
+                }}
                 placeholder="Paste your daily Gemini Spark digest here..."
                 className="w-full h-32 p-3 text-xs bg-slate-950 border border-slate-800 rounded-lg text-slate-300 focus:outline-none focus:border-brand-cyan transition-colors resize-none font-mono"
               />
@@ -614,13 +624,25 @@ export default function Dashboard() {
                   </select>
                 </div>
               </div>
-              <button
-                type="button"
-                onClick={handleExtractPost}
-                className="py-1.5 px-3 rounded-lg bg-brand-cyan/10 hover:bg-brand-cyan/20 border border-brand-cyan/20 text-[10px] font-bold text-brand-cyan text-center transition-all cursor-pointer"
-              >
-                Extract Selected News & Load Into Payload
-              </button>
+              <div className="flex gap-2">
+                <button
+                  type="button"
+                  onClick={handleExtractPost}
+                  className="flex-1 py-1.5 px-3 rounded-lg bg-brand-cyan/10 hover:bg-brand-cyan/20 border border-brand-cyan/20 text-[10px] font-bold text-brand-cyan text-center transition-all cursor-pointer"
+                >
+                  Extract Selected News & Load Into Payload
+                </button>
+                {fullDigestText && simText !== fullDigestText && (
+                  <button
+                    type="button"
+                    onClick={() => setSimText(fullDigestText)}
+                    className="py-1.5 px-3 rounded-lg border border-slate-800 hover:border-slate-700 text-[10px] font-semibold text-slate-400 text-center transition-all cursor-pointer bg-slate-900/40"
+                    title="Restore full email text"
+                  >
+                    Reset Full Text
+                  </button>
+                )}
+              </div>
             </div>
 
             <div className="flex items-center justify-between gap-3 bg-slate-950/60 p-2.5 rounded-xl border border-slate-900/80">
