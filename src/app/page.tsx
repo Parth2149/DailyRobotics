@@ -62,7 +62,7 @@ export default function Dashboard() {
   const [stats, setStats] = useState<Stats>({ received: 0, processing: 0, ready: 0 });
   const [loading, setLoading] = useState(true);
   const [simulating, setSimulating] = useState(false);
-  const [simText, setSimText] = useState(SAMPLE_NEWS);
+  const [simText, setSimText] = useState('');
   const [showSimulator, setShowSimulator] = useState(false);
   const [numPostsToSimulate, setNumPostsToSimulate] = useState(1);
   const [subreddit, setSubreddit] = useState('test');
@@ -474,6 +474,7 @@ export default function Dashboard() {
               <textarea
                 value={simText}
                 onChange={(e) => setSimText(e.target.value)}
+                placeholder="Paste your daily Gemini Spark digest here..."
                 className="w-full h-32 p-3 text-xs bg-slate-950 border border-slate-800 rounded-lg text-slate-300 focus:outline-none focus:border-brand-cyan transition-colors resize-none font-mono"
               />
             </div>
