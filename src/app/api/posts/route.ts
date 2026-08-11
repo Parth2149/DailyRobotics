@@ -26,6 +26,18 @@ export async function GET() {
       ready: readyCount.count || 0,
     };
 
+    // Fetch the list of received posts in Inbox
+    const { data: inbox, error: inboxError } = await supabaseServer
+      .from('posts')
+      .select('*')
+      .eq('status', 'RECEIVED')
+      .order('created_at', { ascending: false });
+
+    if (inboxError) {
+      console.error('[Posts API] Error fetching inbox posts:', inboxError);
+      return NextResponse.json({ error: 'Failed to fetch inbox posts' }, { status: 500 });
+    }
+
     // Fetch the list of ready posts to render in the feed
     const { data: posts, error: postsError } = await supabaseServer
       .from('posts')
@@ -53,6 +65,7 @@ export async function GET() {
     return NextResponse.json({
       success: true,
       stats,
+      inbox: inbox || [],
       posts: posts || [],
       published: published || [],
       subreddit: process.env.REDDIT_SUBREDDIT || 'test',

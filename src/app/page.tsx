@@ -59,6 +59,7 @@ const SAMPLE_NEWS = `Daily Robotics Digest:
 export default function Dashboard() {
   const [posts, setPosts] = useState<Post[]>([]);
   const [publishedPosts, setPublishedPosts] = useState<Post[]>([]);
+  const [inboxPosts, setInboxPosts] = useState<Post[]>([]);
   const [stats, setStats] = useState<Stats>({ received: 0, processing: 0, ready: 0 });
   const [loading, setLoading] = useState(true);
   const [simulating, setSimulating] = useState(false);
@@ -94,6 +95,7 @@ export default function Dashboard() {
         setStats(data.stats);
         setPosts(data.posts || []);
         setPublishedPosts(data.published || []);
+        setInboxPosts(data.inbox || []);
         setSubreddit(data.subreddit || 'test');
         
         // Initialize editable states for all posts (both ready and published)
@@ -212,6 +214,22 @@ export default function Dashboard() {
     } catch (err) {
       console.error('Error stopping in-progress posts:', err);
       alert('Error connecting to deletion API');
+    }
+  };
+
+  // 3.8 Load an Inbox post into the Webhook Simulator
+  const handleLoadIntoSimulator = async (post: Post) => {
+    setSimText(post.raw_spark_text);
+    setShowSimulator(true);
+    
+    // Silently delete the inbox post from the database
+    try {
+      await fetch(`/api/posts?postId=${post.id}`, {
+        method: 'DELETE',
+      });
+      loadDashboardData();
+    } catch (err) {
+      console.error('Error removing inbox post:', err);
     }
   };
 
@@ -513,6 +531,38 @@ export default function Dashboard() {
           </div>
         )}
       </div>
+
+      {/* 2.5 Incoming Spark Inbox */}
+      {inboxPosts.length > 0 && (
+        <section className="w-full max-w-md px-4 mt-6">
+          <h2 className="text-xs font-bold uppercase text-brand-cyan tracking-widest flex items-center gap-2 mb-3">
+            <span>Incoming Spark Inbox</span>
+            <span className="w-2.5 h-2.5 rounded-full bg-brand-cyan animate-pulse"></span>
+          </h2>
+          <div className="flex flex-col gap-3">
+            {inboxPosts.map((post) => (
+              <div key={post.id} className="p-4 glass-panel rounded-2xl border border-brand-cyan/20 flex flex-col gap-3 transition-all hover:border-brand-cyan/40">
+                <div className="flex items-center justify-between text-[10px] text-slate-500 font-medium">
+                  <span>Received via Email</span>
+                  <span>
+                    {new Date(post.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                  </span>
+                </div>
+                <p className="text-xs text-slate-300 line-clamp-3 leading-relaxed font-mono">
+                  {post.raw_spark_text}
+                </p>
+                <button
+                  onClick={() => handleLoadIntoSimulator(post)}
+                  className="mt-1 py-2 w-full rounded-xl bg-brand-cyan/10 hover:bg-brand-cyan/20 text-brand-cyan text-xs font-bold flex items-center justify-center gap-1.5 transition-all border border-brand-cyan/20 cursor-pointer"
+                >
+                  <Database className="w-3.5 h-3.5" />
+                  Load into Webhook Simulator
+                </button>
+              </div>
+            ))}
+          </div>
+        </section>
+      )}
 
       {/* 3. Ready Posts List / Feed */}
       <main className="w-full max-w-md px-4 mt-6 flex flex-col gap-6">

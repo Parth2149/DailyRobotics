@@ -11,7 +11,7 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: 'Text field is required' }, { status: 400 });
     }
 
-    // 1. Insert a new row with status 'RECEIVED'
+    // 1. Insert a new row with status 'RECEIVED' (Inbox)
     const { data: insertData, error: insertError } = await supabaseServer
       .from('posts')
       .insert({
@@ -27,52 +27,13 @@ export async function POST(request: Request) {
     }
 
     const postId = insertData.id;
-
-    // 2. Immediately update status to 'PROCESSING'
-    const { error: updateError } = await supabaseServer
-      .from('posts')
-      .update({ status: 'PROCESSING' })
-      .eq('id', postId);
-
-    if (updateError) {
-      console.error('Database update to PROCESSING error:', updateError);
-      // We can still continue since the record is created.
-    }
-
-    // 3. Resolve the API host to call the generation route asynchronously
-    const host = request.headers.get('host') || 'localhost:2121';
-    const protocol = host.includes('localhost') ? 'http' : 'https';
-    const generateUrl = `${protocol}://${host}/api/generate`;
-
-    // Use Next.js native after() to run the background generation job.
-    // This allows the server to send the response immediately and run the work after the connection closes.
-    after(async () => {
-      try {
-        console.log(`[Webhook] Asynchronously triggering generation for post ${postId}...`);
-        const response = await fetch(generateUrl, {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify({ postId, raw_spark_text: text }),
-        });
-        
-        if (!response.ok) {
-          const errText = await response.text();
-          console.error(`[Webhook] Async generation trigger failed with status ${response.status}: ${errText}`);
-        } else {
-          console.log(`[Webhook] Async generation triggered successfully for post ${postId}`);
-        }
-      } catch (err) {
-        console.error('[Webhook] Async fetch trigger failed:', err);
-      }
-    });
+    console.log(`[Webhook] Incoming Spark text recorded in Inbox (RECEIVED) for post ${postId}`);
 
     return NextResponse.json({
       success: true,
-      message: 'Webhook received. Processing started.',
+      message: 'Incoming Spark text recorded in Inbox.',
       postId,
-      status: 'PROCESSING'
+      status: 'RECEIVED'
     });
   } catch (error: any) {
     console.error('[Webhook Error]:', error);
