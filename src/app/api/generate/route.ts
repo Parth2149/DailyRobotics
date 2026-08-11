@@ -242,17 +242,28 @@ export async function POST(request: Request) {
         throw new Error('Gemini output is missing expected fields.');
       }
     } catch (geminiError: any) {
-      console.warn('[Generate API] Gemini API call failed. Falling back to mock copywriting.', geminiError.message || geminiError);
+      console.warn('[Generate API] Gemini API call failed. Running smart text fallback based on input.', geminiError.message || geminiError);
       
-      // Fallback copywriting so the pipeline can still be tested without a valid API key
-      xPostText = `Daily Robotics Digest 🤖\n\n• Unitree G1 humanoid robot launched at $16,000.\n• Boston Dynamics retired hydraulic Atlas, debuting all-electric version.\n• Sanctuary AI partner Microsoft on large physical models (LPMs).\n• Tesla Optimus gigafactory trials deployed.\n\n#Robotics #TechNews`;
+      // Clean up raw text (remove HTML elements or excess spacing if any)
+      const cleanInput = raw_spark_text
+        .replace(/<[^>]*>/g, '') // remove HTML tags if any
+        .trim();
+        
+      // For X: extract the first few sentences or lines (up to ~260 chars) to make a readable preview
+      let xSummary = cleanInput;
+      if (xSummary.length > 260) {
+        const cutoff = xSummary.indexOf(' ', 250);
+        xSummary = cutoff > 250 ? xSummary.slice(0, cutoff) + '...' : xSummary.slice(0, 250) + '...';
+      }
       
-      redditPostText = `### Daily Robotics News Digest\n\nHere is a summary of today's key developments in physical AI and robotics:\n\n1. **Unitree G1 Humanoid**: Priced at a revolutionary $16,000, it features advanced locomotion and manipulation.\n2. **Boston Dynamics Electric Atlas**: Replaced the legacy hydraulic Atlas, launching a highly agile electric model.\n3. **Sanctuary AI & Microsoft**: Partnering to train Large Physical Models (LPMs) using Azure Cloud infrastructure.\n4. **Tesla Optimus gigafactory trials**: Performing real-world cell sorting tasks with neural network controls.\n\n*What are your thoughts on Unitree's pricing? Is $16k the tipping point for commercial humanoids? Let's discuss below!*`;
+      xPostText = `🤖 Daily Robotics Digest\n\n${xSummary}\n\n#Robotics #TechNews`;
+      
+      // For Reddit: Use the entire raw text body directly
+      redditPostText = `### Daily Robotics News Digest\n\n${cleanInput}\n\n*What are your thoughts on today's updates? Let's discuss below!*`;
 
-      // Generate a slightly varied mock image prompt based on the post ID to ensure unique images even in fallback
-      const seeds = ['humanoid robot walking', 'bipedal robot carrying box', 'robotic hand soldering', 'robotic arm sorting batteries'];
-      const seedIndex = Math.abs(postId.split('').reduce((acc: number, char: string) => acc + char.charCodeAt(0), 0)) % seeds.length;
-      imagePrompt = `A futuristic white and glowing high-shine blue robot, specifically a ${seeds[seedIndex]}, in a dark tech environment.`;
+      // Generate a varied mock image prompt based on the first few words of the input
+      const firstWords = cleanInput.split(' ').slice(0, 5).join(' ');
+      imagePrompt = `A futuristic white and glowing high-shine blue robot representing: ${firstWords || 'robotics technology'}, in a dark tech environment.`;
     }
 
     // 1.5 Extract first link and attempt to fetch its Open Graph thumbnail image to save credits
