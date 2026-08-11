@@ -34,6 +34,70 @@ const XIcon = (props: React.SVGProps<SVGSVGElement>) => (
   </svg>
 );
 
+// Client-side parser to extract a specific post from the multi-section daily email digest
+function extractPostFromDigest(rawText: string, sectionName: string, postNumber: number): string | null {
+  if (!rawText) return null;
+
+  // Split the text into sections
+  const sections = ['Latest News & Major Developments', 'Open-Source Frameworks & Development Tools', 'Career Opportunities & Hiring Trends'];
+  
+  // Find where our target section starts
+  const sectionIndex = rawText.toLowerCase().indexOf(sectionName.toLowerCase());
+  if (sectionIndex === -1) return null;
+
+  // Find where the next section starts to bound our search
+  let nextSectionIndex = rawText.length;
+  sections.forEach((s) => {
+    if (s.toLowerCase() !== sectionName.toLowerCase()) {
+      const idx = rawText.toLowerCase().indexOf(s.toLowerCase(), sectionIndex + 1);
+      if (idx !== -1 && idx < nextSectionIndex) {
+        nextSectionIndex = idx;
+      }
+    }
+  });
+
+  // Extract the text block of our section
+  const sectionBlock = rawText.slice(sectionIndex + sectionName.length, nextSectionIndex).trim();
+
+  // Split the section block into lines/bullet points
+  const lines = sectionBlock.split('\n');
+  const bulletPoints: string[] = [];
+
+  let currentPoint = '';
+
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i].trim();
+    if (!line) continue;
+
+    // Check if the line starts a new bullet point (starts with -, *, •, or digit+dot)
+    const isNewBullet = /^[•\-\*]\s+/.test(line) || /^\d+\.\s+/.test(line);
+
+    if (isNewBullet) {
+      if (currentPoint) {
+        bulletPoints.push(currentPoint.trim());
+      }
+      currentPoint = line.replace(/^[•\-\*]\s+/, '').replace(/^\d+\.\s+/, '');
+    } else {
+      if (currentPoint) {
+        currentPoint += ' ' + line;
+      } else {
+        currentPoint = line;
+      }
+    }
+  }
+
+  if (currentPoint) {
+    bulletPoints.push(currentPoint.trim());
+  }
+
+  // Return the selected post number (1-indexed)
+  if (postNumber <= bulletPoints.length) {
+    return bulletPoints[postNumber - 1];
+  }
+
+  return null;
+}
+
 interface Post {
   id: string;
   raw_spark_text: string;
@@ -76,6 +140,10 @@ export default function Dashboard() {
   const [publishingReddit, setPublishingReddit] = useState<Record<string, boolean>>({});
   const [publishingX, setPublishingX] = useState<Record<string, boolean>>({});
   const [rejectingPost, setRejectingPost] = useState<Record<string, boolean>>({});
+  
+  // Quick Digest Extractor states
+  const [extractSection, setExtractSection] = useState('Latest News & Major Developments');
+  const [extractPostNum, setExtractPostNum] = useState(1);
   
   // Web Share fallback modal state (supports both X and Reddit direct sharing)
   const [fallbackModal, setFallbackModal] = useState<{
@@ -230,6 +298,21 @@ export default function Dashboard() {
       loadDashboardData();
     } catch (err) {
       console.error('Error removing inbox post:', err);
+    }
+  };
+
+  // 3.9 Extract a specific post from the raw email digest text currently in the simulator
+  const handleExtractPost = () => {
+    if (!simText) {
+      alert('Please paste the daily digest email text into the simulator text box first!');
+      return;
+    }
+    const extracted = extractPostFromDigest(simText, extractSection, extractPostNum);
+    if (extracted) {
+      setSimText(extracted);
+      console.log(`[Extractor] Extracted post ${extractPostNum} from "${extractSection}" successfully.`);
+    } else {
+      alert(`Could not find Post ${extractPostNum} inside the "${extractSection}" section of your text. Please verify the section names or bullet points in the text.`);
     }
   };
 
@@ -495,6 +578,49 @@ export default function Dashboard() {
                 placeholder="Paste your daily Gemini Spark digest here..."
                 className="w-full h-32 p-3 text-xs bg-slate-950 border border-slate-800 rounded-lg text-slate-300 focus:outline-none focus:border-brand-cyan transition-colors resize-none font-mono"
               />
+            </div>
+
+            {/* Quick Extractor options */}
+            <div className="p-3 bg-slate-950/60 rounded-xl border border-slate-900 flex flex-col gap-2.5">
+              <div className="flex items-center gap-1.5 text-[10px] font-bold uppercase text-brand-cyan tracking-wider">
+                <Sparkles className="w-3.5 h-3.5 text-brand-cyan animate-pulse" />
+                Quick Extract from Digest
+              </div>
+              <div className="grid grid-cols-2 gap-2">
+                <div className="flex flex-col gap-1">
+                  <span className="text-[9px] font-semibold text-slate-400">Select Part (Section)</span>
+                  <select
+                    value={extractSection}
+                    onChange={(e) => setExtractSection(e.target.value)}
+                    className="w-full bg-slate-950 border border-slate-850 text-[10px] text-slate-300 px-2.5 py-1.5 rounded-lg focus:outline-none focus:border-brand-cyan cursor-pointer"
+                  >
+                    <option value="Latest News & Major Developments">1. News & Major Devs</option>
+                    <option value="Open-Source Frameworks & Development Tools">2. Open-Source Tools</option>
+                    <option value="Career Opportunities & Hiring Trends">3. Careers & Hiring</option>
+                  </select>
+                </div>
+                <div className="flex flex-col gap-1">
+                  <span className="text-[9px] font-semibold text-slate-400">Select Post #</span>
+                  <select
+                    value={extractPostNum}
+                    onChange={(e) => setExtractPostNum(Number(e.target.value))}
+                    className="w-full bg-slate-950 border border-slate-850 text-[10px] text-slate-300 px-2.5 py-1.5 rounded-lg focus:outline-none focus:border-brand-cyan cursor-pointer"
+                  >
+                    <option value={1}>Post 1</option>
+                    <option value={2}>Post 2</option>
+                    <option value={3}>Post 3</option>
+                    <option value={4}>Post 4</option>
+                    <option value={5}>Post 5</option>
+                  </select>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={handleExtractPost}
+                className="py-1.5 px-3 rounded-lg bg-brand-cyan/10 hover:bg-brand-cyan/20 border border-brand-cyan/20 text-[10px] font-bold text-brand-cyan text-center transition-all cursor-pointer"
+              >
+                Extract Selected News & Load Into Payload
+              </button>
             </div>
 
             <div className="flex items-center justify-between gap-3 bg-slate-950/60 p-2.5 rounded-xl border border-slate-900/80">
