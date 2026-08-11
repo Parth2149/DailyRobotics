@@ -173,6 +173,60 @@ async function getOgImage(url: string): Promise<string | null> {
   return null;
 }
 
+// Clean up raw URLs, duplicate brackets, and trailing spacing/commas from text
+function cleanBodyText(text: string): string {
+  // Replace raw URLs with empty string
+  let cleaned = text.replace(/https?:\/\/[^\s\)\],]+/g, '');
+  // Clean up empty parentheses or brackets left behind, e.g. "( , )", "()"
+  cleaned = cleaned.replace(/\(\s*[,|]*\s*\)/g, '');
+  // Clean up double spaces or spaces before punctuation
+  cleaned = cleaned.replace(/\s+/g, ' ');
+  // Clean up stray commas or punctuation at the end
+  cleaned = cleaned.replace(/\s*[,;]\s*$/g, '');
+  return cleaned.trim();
+}
+
+// Format a clean, styled Reddit post for the fallback
+function formatSmartRedditFallback(cleanText: string): string {
+  const colonIndex = cleanText.indexOf(':');
+  let title = 'Daily Robotics News Update';
+  let body = cleanText;
+
+  if (colonIndex > 0 && colonIndex < 100) {
+    title = cleanText.slice(0, colonIndex).trim();
+    body = cleanText.slice(colonIndex + 1).trim();
+  }
+
+  // Remove list numbering or bullets from the title
+  title = title.replace(/^\d+\.\s*/, '').replace(/^[•\-\*]\s*/, '');
+
+  return `### 🤖 ${title}\n\n> ${body}\n\n*What are your thoughts on today's updates? Let's discuss below!*`;
+}
+
+// Format a punchy, clean tweet under X's character limit for the fallback
+function formatSmartXFallback(cleanText: string): string {
+  const colonIndex = cleanText.indexOf(':');
+  let title = 'Daily Robotics Update';
+  let body = cleanText;
+
+  if (colonIndex > 0 && colonIndex < 100) {
+    title = cleanText.slice(0, colonIndex).trim();
+    body = cleanText.slice(colonIndex + 1).trim();
+  }
+
+  title = title.replace(/^\d+\.\s*/, '').replace(/^[•\-\*]\s*/, '');
+
+  // Draft a clean bullet point tweet
+  let draft = `🤖 ${title.toUpperCase()}\n\n• ${body}`;
+  
+  if (draft.length > 220) {
+    const cutoff = draft.indexOf(' ', 210);
+    draft = cutoff > 210 ? draft.slice(0, cutoff) + '...' : draft.slice(0, 210) + '...';
+  }
+
+  return `${draft}\n\n#Robotics #TechNews`;
+}
+
 export async function POST(request: Request) {
   try {
     const body = await request.json();
@@ -248,21 +302,17 @@ export async function POST(request: Request) {
       const cleanInput = raw_spark_text
         .replace(/<[^>]*>/g, '') // remove HTML tags if any
         .trim();
+      
+      const parsedBody = cleanBodyText(cleanInput);
         
-      // For X: extract the first few sentences or lines (up to ~260 chars) to make a readable preview
-      let xSummary = cleanInput;
-      if (xSummary.length > 260) {
-        const cutoff = xSummary.indexOf(' ', 250);
-        xSummary = cutoff > 250 ? xSummary.slice(0, cutoff) + '...' : xSummary.slice(0, 250) + '...';
-      }
+      // For X: extract structured tweet under X's character limit
+      xPostText = formatSmartXFallback(parsedBody);
       
-      xPostText = `🤖 Daily Robotics Digest\n\n${xSummary}\n\n#Robotics #TechNews`;
-      
-      // For Reddit: Use the entire raw text body directly
-      redditPostText = `### Daily Robotics News Digest\n\n${cleanInput}\n\n*What are your thoughts on today's updates? Let's discuss below!*`;
+      // For Reddit: Use the formatted title & blockquote structure
+      redditPostText = formatSmartRedditFallback(parsedBody);
 
       // Generate a varied mock image prompt based on the first few words of the input
-      const firstWords = cleanInput.split(' ').slice(0, 5).join(' ');
+      const firstWords = parsedBody.split(' ').slice(0, 5).join(' ');
       imagePrompt = `A futuristic white and glowing high-shine blue robot representing: ${firstWords || 'robotics technology'}, in a dark tech environment.`;
     }
 
