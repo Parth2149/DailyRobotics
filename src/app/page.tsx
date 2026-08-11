@@ -447,7 +447,7 @@ export default function Dashboard() {
         const response = await fetch('/api/webhook/spark', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ text: customText })
+          body: JSON.stringify({ text: customText, autoProcess: true })
         });
         
         if (!response.ok) {
