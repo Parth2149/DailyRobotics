@@ -145,6 +145,7 @@ export default function Dashboard() {
   const [extractSection, setExtractSection] = useState('Latest News & Major Developments');
   const [extractPostNum, setExtractPostNum] = useState(1);
   const [fullDigestText, setFullDigestText] = useState('');
+  const [activeInboxPostId, setActiveInboxPostId] = useState<string | null>(null);
   
   // Web Share fallback modal state (supports both X and Reddit direct sharing)
   const [fallbackModal, setFallbackModal] = useState<{
@@ -164,8 +165,18 @@ export default function Dashboard() {
         setStats(data.stats);
         setPosts(data.posts || []);
         setPublishedPosts(data.published || []);
-        setInboxPosts(data.inbox || []);
+        
+        const inboxList = data.inbox || [];
+        setInboxPosts(inboxList);
         setSubreddit(data.subreddit || 'test');
+        
+        // Auto-load the latest inbox post if the simulator is currently empty
+        if (inboxList.length > 0 && !simText && !fullDigestText) {
+          setSimText(inboxList[0].raw_spark_text);
+          setFullDigestText(inboxList[0].raw_spark_text);
+          setActiveInboxPostId(inboxList[0].id);
+          setShowSimulator(true);
+        }
         
         // Initialize editable states for all posts (both ready and published)
         const xTexts: Record<string, string> = {};
@@ -287,20 +298,11 @@ export default function Dashboard() {
   };
 
   // 3.8 Load an Inbox post into the Webhook Simulator
-  const handleLoadIntoSimulator = async (post: Post) => {
+  const handleLoadIntoSimulator = (post: Post) => {
     setSimText(post.raw_spark_text);
     setFullDigestText(post.raw_spark_text);
+    setActiveInboxPostId(post.id);
     setShowSimulator(true);
-    
-    // Silently delete the inbox post from the database
-    try {
-      await fetch(`/api/posts?postId=${post.id}`, {
-        method: 'DELETE',
-      });
-      loadDashboardData();
-    } catch (err) {
-      console.error('Error removing inbox post:', err);
-    }
   };
 
   // 3.9 Extract a specific post from the raw email digest text currently in the simulator
@@ -452,6 +454,18 @@ export default function Dashboard() {
         
         if (!response.ok) {
           console.error(`Simulation call #${i + 1} failed`);
+        }
+      }
+      
+      // Silently delete the processed inbox post from the database on success
+      if (activeInboxPostId) {
+        try {
+          await fetch(`/api/posts?postId=${activeInboxPostId}`, {
+            method: 'DELETE',
+          });
+          setActiveInboxPostId(null);
+        } catch (err) {
+          console.error('Error removing processed inbox post:', err);
         }
       }
       
