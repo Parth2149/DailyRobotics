@@ -116,15 +116,34 @@ function extractFirstLink(text: string): string | null {
   // Regex to match markdown links: [Label](URL)
   const markdownRegex = /\[[^\]]+\]\((https?:\/\/[^)]+)\)/;
   const matchMarkdown = text.match(markdownRegex);
+  let url: string | null = null;
+
   if (matchMarkdown && matchMarkdown[1]) {
-    return matchMarkdown[1];
+    url = matchMarkdown[1];
+  } else {
+    // Fallback to standard URL regex (excluding trailing punctuation/parentheses)
+    const urlRegex = /(https?:\/\/[^\s\)\],]+)/;
+    const matchUrl = text.match(urlRegex);
+    if (matchUrl && matchUrl[1]) {
+      url = matchUrl[1];
+    }
   }
 
-  // Fallback to standard URL regex (excluding trailing punctuation/parentheses)
-  const urlRegex = /(https?:\/\/[^\s\)\],]+)/;
-  const matchUrl = text.match(urlRegex);
-  if (matchUrl && matchUrl[1]) {
-    return matchUrl[1];
+  if (url) {
+    // Gmail rewrites links to google.com/url?q=real_url. We unwrap it so the scraper hits the real page!
+    if (url.includes('google.com/url?') && url.includes('q=')) {
+      try {
+        const urlObj = new URL(url);
+        const realUrl = urlObj.searchParams.get('q');
+        if (realUrl) {
+          console.log(`[Link Extractor] Unwrapped Google redirect URL: ${realUrl}`);
+          return realUrl;
+        }
+      } catch (err: any) {
+        console.warn('[Link Extractor] Failed to unwrap Google redirect URL:', err.message || err);
+      }
+    }
+    return url;
   }
 
   return null;
