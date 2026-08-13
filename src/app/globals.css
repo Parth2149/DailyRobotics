@@ -79,3 +79,19 @@ body {
     linear-gradient(to right, rgba(0, 210, 255, 0.02) 1px, transparent 1px),
     linear-gradient(to bottom, rgba(0, 210, 255, 0.02) 1px, transparent 1px);
 }
+
+/* Fade-in animation used by simulator panel and modals */
+@keyframes fadeIn {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.animate-fadeIn {
+  animation: fadeIn 0.25s ease-out both;
+}

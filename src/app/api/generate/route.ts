@@ -113,16 +113,16 @@ async function generateImage(prompt: string): Promise<string> {
 
 // Extract the first http/https URL link in the text (supporting markdown or raw URLs)
 function extractFirstLink(text: string): string | null {
-  // Regex to match markdown links: [Label](URL)
-  const markdownRegex = /\[[^\]]+\]\((https?:\/\/[^)]+)\)/;
+  // Regex to match markdown links: [Label](URL) — stops at ) or trailing &
+  const markdownRegex = /\[[^\]]+\]\((https?:\/\/[^)\s]+)\)/;
   const matchMarkdown = text.match(markdownRegex);
   let url: string | null = null;
 
   if (matchMarkdown && matchMarkdown[1]) {
     url = matchMarkdown[1];
   } else {
-    // Fallback to standard URL regex (excluding trailing punctuation/parentheses)
-    const urlRegex = /(https?:\/\/[^\s\)\],]+)/;
+    // Fallback to standard URL regex (excluding trailing punctuation/parentheses/ampersands)
+    const urlRegex = /(https?:\/\/[^\s\)\],&]+)/;
     const matchUrl = text.match(urlRegex);
     if (matchUrl && matchUrl[1]) {
       url = matchUrl[1];
@@ -130,6 +130,9 @@ function extractFirstLink(text: string): string | null {
   }
 
   if (url) {
+    // Strip any remaining trailing punctuation that may have been captured
+    url = url.replace(/[.,;:!?]+$/, '');
+
     // Gmail rewrites links to google.com/url?q=real_url. We unwrap it so the scraper hits the real page!
     if (url.includes('google.com/url?') && url.includes('q=')) {
       try {
@@ -151,10 +154,10 @@ function extractFirstLink(text: string): string | null {
 
 // Scrape HTML of the target webpage to retrieve Open Graph image tags
 async function getOgImage(url: string): Promise<string | null> {
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), 7000); // 7s timeout
   try {
     console.log(`[Scraper] Fetching HTML from ${url}...`);
-    const controller = new AbortController();
-    const id = setTimeout(() => controller.abort(), 6000); // 6s timeout
 
     const res = await fetch(url, { 
       signal: controller.signal,
@@ -162,7 +165,7 @@ async function getOgImage(url: string): Promise<string | null> {
         'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
       }
     });
-    clearTimeout(id);
+    clearTimeout(timeoutId);
 
     if (!res.ok) {
       console.warn(`[Scraper] Failed to fetch page: ${res.statusText}`);
@@ -171,15 +174,20 @@ async function getOgImage(url: string): Promise<string | null> {
 
     const html = await res.text();
 
-    // Regex to match og:image or twitter:image metadata tags
+    // Regex to match og:image or twitter:image metadata tags (both attribute orderings)
     const ogImageRegex = /<meta\s+[^>]*property=["']og:image["']\s+[^>]*content=["']([^"']+)["']/i;
     const ogImageRegexAlt = /<meta\s+[^>]*content=["']([^"']+)["']\s+[^>]*property=["']og:image["']/i;
     const twitterImageRegex = /<meta\s+[^>]*name=["']twitter:image["']\s+[^>]*content=["']([^"']+)["']/i;
+    const twitterImageRegexAlt = /<meta\s+[^>]*content=["']([^"']+)["']\s+[^>]*name=["']twitter:image["']/i;
 
-    let match = html.match(ogImageRegex) || html.match(ogImageRegexAlt) || html.match(twitterImageRegex);
+    const match = html.match(ogImageRegex) || html.match(ogImageRegexAlt) || html.match(twitterImageRegex) || html.match(twitterImageRegexAlt);
     if (match && match[1]) {
       let imgUrl = match[1];
-      if (imgUrl.startsWith('/')) {
+      // Handle protocol-relative URLs like //example.com/image.jpg
+      if (imgUrl.startsWith('//')) {
+        imgUrl = `https:${imgUrl}`;
+      } else if (imgUrl.startsWith('/')) {
+        // Handle root-relative URLs
         const urlObj = new URL(url);
         imgUrl = `${urlObj.origin}${imgUrl}`;
       }
@@ -187,6 +195,7 @@ async function getOgImage(url: string): Promise<string | null> {
       return imgUrl;
     }
   } catch (err: any) {
+    clearTimeout(timeoutId);
     console.warn(`[Scraper] Error scraping URL ${url}:`, err.message || err);
   }
   return null;
@@ -235,15 +244,17 @@ function formatSmartXFallback(cleanText: string): string {
 
   title = title.replace(/^\d+\.\s*/, '').replace(/^[•\-\*]\s*/, '');
 
-  // Draft a clean bullet point tweet
-  let draft = `🤖 ${title.toUpperCase()}\n\n• ${body}`;
+  const hashtags = '\n\n#Robotics #TechNews';
+  // Reserve space for hashtags so the total post fits within 280 chars
+  const maxBodyLength = 220 - hashtags.length - title.length - 4; // 4 = "🤖 " + "\n\n• "
   
-  if (draft.length > 220) {
-    const cutoff = draft.indexOf(' ', 210);
-    draft = cutoff > 210 ? draft.slice(0, cutoff) + '...' : draft.slice(0, 210) + '...';
+  let truncatedBody = body;
+  if (body.length > maxBodyLength) {
+    const cutoff = body.indexOf(' ', maxBodyLength - 10);
+    truncatedBody = cutoff > 0 ? body.slice(0, cutoff) + '...' : body.slice(0, maxBodyLength) + '...';
   }
 
-  return `${draft}\n\n#Robotics #TechNews`;
+  return `🤖 ${title.toUpperCase()}\n\n• ${truncatedBody}${hashtags}`;
 }
 
 export async function POST(request: Request) {
@@ -307,9 +318,9 @@ export async function POST(request: Request) {
       }
 
       const parsedJson = JSON.parse(cleanedText);
-      xPostText = parsedJson.x_post;
-      redditPostText = parsedJson.reddit_post;
-      imagePrompt = parsedJson.image_prompt;
+      xPostText = parsedJson.x_post || parsedJson.x_post_text || '';
+      redditPostText = parsedJson.reddit_post || parsedJson.reddit_post_text || '';
+      imagePrompt = parsedJson.image_prompt || '';
 
       if (!xPostText || !redditPostText || !imagePrompt) {
         throw new Error('Gemini output is missing expected fields.');

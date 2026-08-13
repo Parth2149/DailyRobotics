@@ -4,70 +4,48 @@ import { supabaseServer } from '@/lib/supabase';
 // GET: Fetch real-time counts and all posts with status 'READY'
 export async function GET() {
   try {
-    // Run parallel count queries for stats
-    const [receivedCount, processingCount, readyCount] = await Promise.all([
-      supabaseServer
-        .from('posts')
-        .select('*', { count: 'exact', head: true })
-        .eq('status', 'RECEIVED'),
-      supabaseServer
-        .from('posts')
-        .select('*', { count: 'exact', head: true })
-        .eq('status', 'PROCESSING'),
-      supabaseServer
-        .from('posts')
-        .select('*', { count: 'exact', head: true })
-        .eq('status', 'READY'),
+    // Run all 6 DB queries in parallel for maximum performance
+    const [
+      receivedResult,
+      processingResult,
+      readyResult,
+      inboxResult,
+      postsResult,
+      publishedResult,
+    ] = await Promise.all([
+      supabaseServer.from('posts').select('*', { count: 'exact', head: true }).eq('status', 'RECEIVED'),
+      supabaseServer.from('posts').select('*', { count: 'exact', head: true }).eq('status', 'PROCESSING'),
+      supabaseServer.from('posts').select('*', { count: 'exact', head: true }).eq('status', 'READY'),
+      supabaseServer.from('posts').select('*').eq('status', 'RECEIVED').order('created_at', { ascending: false }),
+      supabaseServer.from('posts').select('*').eq('status', 'READY').order('created_at', { ascending: false }),
+      supabaseServer.from('posts').select('*').in('status', ['POSTED_REDDIT', 'POSTED_X', 'POSTED_BOTH']).order('created_at', { ascending: false }),
     ]);
 
     const stats = {
-      received: receivedCount.count || 0,
-      processing: processingCount.count || 0,
-      ready: readyCount.count || 0,
+      received: receivedResult.count || 0,
+      processing: processingResult.count || 0,
+      ready: readyResult.count || 0,
     };
 
-    // Fetch the list of received posts in Inbox
-    const { data: inbox, error: inboxError } = await supabaseServer
-      .from('posts')
-      .select('*')
-      .eq('status', 'RECEIVED')
-      .order('created_at', { ascending: false });
-
-    if (inboxError) {
-      console.error('[Posts API] Error fetching inbox posts:', inboxError);
+    if (inboxResult.error) {
+      console.error('[Posts API] Error fetching inbox posts:', inboxResult.error);
       return NextResponse.json({ error: 'Failed to fetch inbox posts' }, { status: 500 });
     }
-
-    // Fetch the list of ready posts to render in the feed
-    const { data: posts, error: postsError } = await supabaseServer
-      .from('posts')
-      .select('*')
-      .eq('status', 'READY')
-      .order('created_at', { ascending: false });
-
-    if (postsError) {
-      console.error('[Posts API] Error fetching ready posts:', postsError);
+    if (postsResult.error) {
+      console.error('[Posts API] Error fetching ready posts:', postsResult.error);
       return NextResponse.json({ error: 'Failed to fetch ready posts' }, { status: 500 });
     }
-
-    // Fetch the list of published posts to render in the history feed
-    const { data: published, error: publishedError } = await supabaseServer
-      .from('posts')
-      .select('*')
-      .in('status', ['POSTED_REDDIT', 'POSTED_X', 'POSTED_BOTH'])
-      .order('created_at', { ascending: false });
-
-    if (publishedError) {
-      console.error('[Posts API] Error fetching published posts:', publishedError);
+    if (publishedResult.error) {
+      console.error('[Posts API] Error fetching published posts:', publishedResult.error);
       return NextResponse.json({ error: 'Failed to fetch published posts' }, { status: 500 });
     }
 
     return NextResponse.json({
       success: true,
       stats,
-      inbox: inbox || [],
-      posts: posts || [],
-      published: published || [],
+      inbox: inboxResult.data || [],
+      posts: postsResult.data || [],
+      published: publishedResult.data || [],
       subreddit: process.env.REDDIT_SUBREDDIT || 'test',
     });
   } catch (error: any) {
@@ -121,9 +99,10 @@ export async function PUT(request: Request) {
 export async function DELETE(request: Request) {
   try {
     const { searchParams } = new URL(request.url);
-    const postId = searchParams.get('postId');
-    const status = searchParams.get('status');
+    const postId = (searchParams.get('postId') || '').trim();
+    const status = (searchParams.get('status') || '').trim();
 
+    // Require at least one non-empty filter to prevent accidental full-table deletion
     if (!postId && !status) {
       return NextResponse.json({ error: 'postId or status is required' }, { status: 400 });
     }
@@ -134,6 +113,11 @@ export async function DELETE(request: Request) {
       console.log(`[Posts API] Deleting/rejecting post ${postId}...`);
       query = query.eq('id', postId);
     } else if (status) {
+      // Only allow whitelisted statuses to be bulk-deleted to prevent accidents
+      const allowedBulkStatuses = ['PROCESSING', 'RECEIVED'];
+      if (!allowedBulkStatuses.includes(status)) {
+        return NextResponse.json({ error: `Bulk deletion of status '${status}' is not allowed` }, { status: 400 });
+      }
       console.log(`[Posts API] Deleting all posts with status ${status}...`);
       query = query.eq('status', status);
     }

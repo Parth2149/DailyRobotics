@@ -356,14 +356,17 @@ export default function Dashboard() {
         console.error('Clipboard copy failed:', clipboardErr);
       }
 
-      // B. Trigger image download
-      const link = document.createElement('a');
-      link.href = post.image_url;
-      link.download = `robotics-image-${post.id.slice(0, 8)}.png`;
-      link.target = '_blank';
-      document.body.appendChild(link);
-      link.click();
-      document.body.removeChild(link);
+      // B. Trigger image download only if image_url is available and not a cross-origin URL that blocks download
+      if (post.image_url) {
+        const link = document.createElement('a');
+        link.href = post.image_url;
+        link.download = `robotics-image-${post.id.slice(0, 8)}.png`;
+        link.target = '_blank';
+        link.rel = 'noopener noreferrer';
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+      }
 
       // C. Show custom guidance modal
       setFallbackModal({
@@ -393,14 +396,17 @@ export default function Dashboard() {
         console.error('Clipboard copy failed:', clipboardErr);
       }
 
-      // B. Trigger image download
-      const link = document.createElement('a');
-      link.href = post.image_url;
-      link.download = `robotics-image-${post.id.slice(0, 8)}.png`;
-      link.target = '_blank';
-      document.body.appendChild(link);
-      link.click();
-      document.body.removeChild(link);
+      // B. Trigger image download only if image_url is available
+      if (post.image_url) {
+        const link = document.createElement('a');
+        link.href = post.image_url;
+        link.download = `robotics-image-${post.id.slice(0, 8)}.png`;
+        link.target = '_blank';
+        link.rel = 'noopener noreferrer';
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+      }
 
       // C. Show custom guidance modal
       setFallbackModal({
@@ -483,6 +489,8 @@ export default function Dashboard() {
   const getXCharCount = (text: string) => text ? text.length : 0;
   const isXCountOverLimit = (text: string) => getXCharCount(text) > 280;
 
+  // isConfigMissing should only use NEXT_PUBLIC_ vars - server vars (GEMINI, SERVICE_ROLE) are never
+  // accessible in client-side bundles, so checking them here always returns true even when set in Vercel
   const isConfigMissing = !process.env.NEXT_PUBLIC_SUPABASE_URL || !process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
 
   if (isConfigMissing) {
@@ -924,7 +932,7 @@ export default function Dashboard() {
                       {isPublishingXField ? (
                         <Loader2 className="w-3.5 h-3.5 animate-spin text-slate-950" />
                       ) : (
-                        <XIcon className="w-4 h-4 text-white" />
+                        <XIcon className="w-4 h-4 text-slate-950" />
                       )}
                       Publish X
                     </button>
@@ -1066,7 +1074,7 @@ export default function Dashboard() {
                         <button
                           onClick={() => handlePublishReddit(post)}
                           disabled={isPublishingR}
-                          className="py-2 px-3 rounded-xl bg-orange-600 hover:bg-orange-500 text-white font-bold text-xs flex items-center justify-center gap-1.5 transition-all shadow-md shadow-orange-650/10 disabled:opacity-50 animate-pulse"
+                          className="py-2 px-3 rounded-xl bg-orange-600 hover:bg-orange-500 text-white font-bold text-xs flex items-center justify-center gap-1.5 transition-all shadow-md shadow-orange-600/10 disabled:opacity-50"
                         >
                           {isPublishingR ? (
                             <Loader2 className="w-3 h-3 animate-spin text-white" />
@@ -1104,15 +1112,9 @@ export default function Dashboard() {
           <div className="w-full max-w-sm p-6 glass-panel rounded-3xl border border-slate-800 flex flex-col gap-4 text-center relative shadow-2xl shadow-cyan-500/10">
             {/* Close Button */}
             <button 
-              onClick={async () => {
-                setFallbackModal(prev => ({ ...prev, show: false }));
-                if (fallbackModal.platform === 'Reddit') {
-                  await updateRedditStatusInDb(fallbackModal.postId);
-                } else {
-                  await updateXStatusInDb(fallbackModal.postId);
-                }
-              }}
+              onClick={() => setFallbackModal(prev => ({ ...prev, show: false }))}
               className="absolute top-4 right-4 p-1.5 rounded-full hover:bg-slate-900 text-slate-400 hover:text-white transition-colors"
+              title="Close"
             >
               <CloseIcon className="w-4 h-4" />
             </button>
