@@ -850,9 +850,14 @@ export default function Dashboard() {
                   {/* eslint-disable-next-line @next/next/no-img-element */}
                   <img 
                     src={post.image_url} 
-                    alt="AI Generated Visual" 
+                    alt="Post Thumbnail Visual" 
                     className="w-full h-full object-cover transition-transform duration-700 group-hover/img:scale-105"
                     loading="lazy"
+                    onError={(e) => {
+                      // Prevent infinite loops if fallback also fails
+                      e.currentTarget.onerror = null;
+                      e.currentTarget.src = "data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='800' height='450' viewBox='0 0 800 450'><rect width='100%' height='100%' fill='%230b0f19'/><defs><pattern id='grid' width='40' height='40' patternUnits='userSpaceOnUse'><path d='M 40 0 L 0 0 0 40' fill='none' stroke='%231e293b' stroke-width='1'/></pattern></defs><rect width='100%' height='100%' fill='url(%23grid)'/><circle cx='400' cy='225' r='80' fill='%2306b6d4' fill-opacity='0.05' stroke='%2306b6d4' stroke-width='2' stroke-dasharray='4,4'/><path d='M370 190h60v50h-60zm10 50h40v15h-40z' fill='none' stroke='%2306b6d4' stroke-width='4' stroke-linejoin='round'/><circle cx='390' cy='210' r='5' fill='%2306b6d4'/><circle cx='410' cy='210' r='5' fill='%2306b6d4'/><path d='M385 230h30' stroke='%2306b6d4' stroke-width='3' stroke-linecap='round'/><path d='M355 215h15M430 215h15' stroke='%2306b6d4' stroke-width='2'/><text x='400' y='340' fill='%2364748b' font-size='14' font-family='monospace' text-anchor='middle' letter-spacing='2'>VISUAL NOT AVAILABLE</text></svg>";
+                    }}
                   />
                   <div className="absolute inset-0 bg-gradient-to-t from-slate-950/80 via-transparent to-transparent flex items-end p-3">
                     {(() => {

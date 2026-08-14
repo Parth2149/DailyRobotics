@@ -113,9 +113,27 @@ export async function PUT(request: Request) {
 // DELETE: Reject/Stop and delete a post from the database
 export async function DELETE(request: Request) {
   try {
-    const { searchParams } = new URL(request.url);
-    const postId = (searchParams.get('postId') || '').trim();
-    const status = (searchParams.get('status') || '').trim();
+    let postId = '';
+    let status = '';
+
+    // Check if the client sent parameters in a JSON body (like our page.tsx inbox delete button)
+    const contentType = request.headers.get('content-type') || '';
+    if (contentType.includes('application/json')) {
+      try {
+        const body = await request.json();
+        postId = (body.postId || '').trim();
+        status = (body.status || '').trim();
+      } catch {
+        // Fall back to query params if JSON parsing fails
+      }
+    }
+
+    // Fall back to query parameters (like our page.tsx manual stop/reject buttons)
+    if (!postId && !status) {
+      const { searchParams } = new URL(request.url);
+      postId = (searchParams.get('postId') || '').trim();
+      status = (searchParams.get('status') || '').trim();
+    }
 
     // Require at least one non-empty filter to prevent accidental full-table deletion
     if (!postId && !status) {
@@ -138,6 +156,7 @@ export async function DELETE(request: Request) {
     }
 
     const { error: deleteError } = await query;
+
 
     if (deleteError) {
       console.error('[Posts API] Error deleting posts:', deleteError);
