@@ -855,11 +855,37 @@ export default function Dashboard() {
                     loading="lazy"
                   />
                   <div className="absolute inset-0 bg-gradient-to-t from-slate-950/80 via-transparent to-transparent flex items-end p-3">
-                    <span className="text-[10px] font-bold text-cyan-400 uppercase tracking-widest bg-slate-950/80 px-2.5 py-1 rounded-full border border-cyan-500/20 backdrop-blur-sm">
-                      Generated Visual
-                    </span>
+                    {(() => {
+                      // Determine image source for the badge
+                      const imgUrl = post.image_url || '';
+                      const isAiGenerated =
+                        imgUrl.includes('pollinations.ai') ||
+                        imgUrl.includes('stability.ai') ||
+                        imgUrl.startsWith('data:image') ||
+                        (imgUrl.includes('supabase') && imgUrl.includes('robotics-posts'));
+                      let sourceDomain = '';
+                      if (!isAiGenerated && imgUrl.startsWith('http')) {
+                        try { sourceDomain = new URL(imgUrl).hostname.replace('www.', ''); } catch {}
+                      }
+                      return isAiGenerated ? (
+                        <span className="text-[10px] font-bold text-purple-300 uppercase tracking-widest bg-slate-950/80 px-2.5 py-1 rounded-full border border-purple-500/30 backdrop-blur-sm flex items-center gap-1">
+                          🤖 AI Generated
+                        </span>
+                      ) : (
+                        <a
+                          href={imgUrl}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="text-[10px] font-bold text-cyan-400 uppercase tracking-widest bg-slate-950/80 px-2.5 py-1 rounded-full border border-cyan-500/20 backdrop-blur-sm flex items-center gap-1 hover:border-cyan-400/50 transition-colors"
+                          title={`Image scraped from: ${imgUrl}`}
+                        >
+                          📸 {sourceDomain || 'Scraped'}
+                        </a>
+                      );
+                    })()}
                   </div>
                 </div>
+
 
                 {/* Expandable Raw Spark News Area */}
                 <div className="w-full border border-slate-800/80 rounded-xl overflow-hidden bg-slate-900/30">

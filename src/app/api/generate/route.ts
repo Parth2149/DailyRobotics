@@ -403,17 +403,22 @@ async function selectBestImageWithGemini(
 
   console.log(`[Gemini Vision] Sending ${valid.length} images to Gemini for best-pick selection...`);
 
-  // Build Gemini multimodal request
+  // Build Gemini multimodal request with strict prompt
   const parts: Array<{ text: string } | { inlineData: { data: string; mimeType: string } }> = [
     {
       text:
-        `You are selecting the best thumbnail image for a robotics and AI news article.\n\n` +
+        `You are a STRICT image curator for a robotics & AI news post.\n\n` +
         `Article context: "${articleContext.slice(0, 400)}"\n\n` +
-        `I will show you ${valid.length} candidate images (labelled 0 to ${valid.length - 1}).\n\n` +
-        `Pick the image that BEST represents the article. ` +
-        `STRONGLY PREFER: article-specific photos, robot photos, charts/graphs, product shots, screenshots of tech.\n` +
-        `STRONGLY AVOID: site logos, small icons, generic stock images, author headshots, brand marks.\n\n` +
-        `Reply with ONLY the index number of the best image (e.g. "2"). No explanation.`
+        `I will show you ${valid.length} candidate images (index 0 to ${valid.length - 1}).\n\n` +
+        `SELECTION RULES — read carefully:\n` +
+        `✅ ACCEPT: actual photos/screenshots directly from the article (robots, charts, graphs, lab equipment, product demos, factory floors, code screenshots, UI screenshots)\n` +
+        `❌ REJECT: website hero/banner images (scenic landscapes, anime art, illustrated backgrounds, gradient art)\n` +
+        `❌ REJECT: brand logos, icons, favicons, wordmarks\n` +
+        `❌ REJECT: generic stock photography (hands on laptops, abstract tech backgrounds)\n` +
+        `❌ REJECT: marketing taglines/slogans overlaid on scenic images\n` +
+        `❌ REJECT: author photos, headshots, avatars\n\n` +
+        `If ALL images violate the REJECT rules and none qualify, reply with "-1".\n` +
+        `Otherwise reply with ONLY the index number of the best qualifying image. No explanation.`
     }
   ];
 
@@ -425,8 +430,12 @@ async function selectBestImageWithGemini(
   try {
     const visionModel = genAI.getGenerativeModel({ model: 'gemini-2.0-flash' });
     const result = await visionModel.generateContent(parts);
-    const answer = result.response.text().trim().replace(/[^\d]/g, '');
+    const answer = result.response.text().trim().replace(/[^\-\d]/g, '');
     const idx = parseInt(answer, 10);
+    if (idx === -1) {
+      console.log('[Gemini Vision] All candidates rejected as generic/logo/hero images. Will use AI-generated fallback.');
+      return null; // Signal to caller: skip to AI generation
+    }
     if (!isNaN(idx) && idx >= 0 && idx < valid.length) {
       console.log(`[Gemini Vision] ✅ Selected image index ${idx}: ${valid[idx].url}`);
       return valid[idx].url;
@@ -608,21 +617,28 @@ export async function POST(request: Request) {
     const allLinks = extractAllLinks(raw_spark_text);
     const blogUrl = allLinks[0] ?? null; // Primary link used for citation
     let imageUrl = '';
+    let imageSourceUrl: string | null = null; // Tracks which source URL provided the winning image
 
     if (allLinks.length > 0) {
       console.log(`[Generate API] Scraping images from ${allLinks.length} link(s):`, allLinks);
 
-      // Collect candidates from ALL source URLs in parallel
-      const perUrlCandidates = await Promise.all(allLinks.map(link => getOgImageCandidates(link)));
-      const allCandidates = perUrlCandidates.flat();
+      // Collect candidates from ALL source URLs in parallel, track which URL each came from
+      const perUrlCandidates = await Promise.all(
+        allLinks.map(async (link) => {
+          const imgs = await getOgImageCandidates(link);
+          return imgs.map(img => ({ img, sourceUrl: link }));
+        })
+      );
+      const allCandidatesMapped = perUrlCandidates.flat();
 
-      // Deduplicate preserving order
+      // Deduplicate by image URL preserving order
       const seenCandidates = new Set<string>();
-      const uniqueCandidates = allCandidates.filter(c => {
-        if (seenCandidates.has(c)) return false;
-        seenCandidates.add(c);
+      const uniqueMapped = allCandidatesMapped.filter(({ img }) => {
+        if (seenCandidates.has(img)) return false;
+        seenCandidates.add(img);
         return true;
       });
+      const uniqueCandidates = uniqueMapped.map(m => m.img);
 
       console.log(`[Generate API] Total unique image candidates: ${uniqueCandidates.length}`, uniqueCandidates);
 
@@ -631,7 +647,12 @@ export async function POST(request: Request) {
         const chosen = await selectBestImageWithGemini(genAI, uniqueCandidates, raw_spark_text);
         if (chosen) {
           imageUrl = chosen;
-          console.log(`[Generate API] ✅ Gemini Vision chose: ${imageUrl}`);
+          // Find which source URL this image came from
+          const sourceEntry = uniqueMapped.find(m => m.img === chosen);
+          imageSourceUrl = sourceEntry?.sourceUrl ?? null;
+          console.log(`[Generate API] ✅ Gemini Vision chose: ${imageUrl} (from ${imageSourceUrl})`);
+        } else {
+          console.log('[Generate API] Gemini Vision rejected all candidates → using AI-generated image.');
         }
       }
     }
@@ -687,6 +708,8 @@ export async function POST(request: Request) {
       xPostText,
       redditPostText,
       imageUrl,
+      imageSourceUrl, // Which URL the image was scraped from (null = AI-generated)
+      imageType: imageSourceUrl ? 'scraped' : 'ai-generated',
     });
   } catch (error: any) {
     console.error('[Generate API Error]:', error);
