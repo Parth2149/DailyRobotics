@@ -34,69 +34,106 @@ const XIcon = (props: React.SVGProps<SVGSVGElement>) => (
   </svg>
 );
 
-// Client-side parser to extract a specific post from the multi-section daily email digest
+// Keyword sets for fuzzy section heading detection — works even if Gemini Spark renames them slightly
+const SECTION_KEYWORDS: Record<string, string[]> = {
+  'Latest News & Major Developments':          ['news', 'developments', 'breaking', 'industry', 'major'],
+  'Open-Source Frameworks & Development Tools': ['open-source', 'frameworks', 'tools', 'developer', 'open'],
+  'Career Opportunities & Hiring Trends':       ['career', 'hiring', 'opportunities', 'trends', 'jobs'],
+};
+
+// Client-side parser to extract a specific post from the multi-section daily email digest.
+// Handles both inline bullets (• text, - text) and standalone-dash format (- alone then indented content).
+// Uses fuzzy keyword matching so it doesn't break when Gemini Spark renames sections.
 function extractPostFromDigest(rawText: string, sectionName: string, postNumber: number): string | null {
   if (!rawText) return null;
 
-  // Split the text into sections
-  const sections = ['Latest News & Major Developments', 'Open-Source Frameworks & Development Tools', 'Career Opportunities & Hiring Trends'];
-  
-  // Find where our target section starts
-  const sectionIndex = rawText.toLowerCase().indexOf(sectionName.toLowerCase());
-  if (sectionIndex === -1) return null;
+  const lines = rawText.split('\n');
 
-  // Find where the next section starts to bound our search
-  let nextSectionIndex = rawText.length;
-  sections.forEach((s) => {
-    if (s.toLowerCase() !== sectionName.toLowerCase()) {
-      const idx = rawText.toLowerCase().indexOf(s.toLowerCase(), sectionIndex + 1);
-      if (idx !== -1 && idx < nextSectionIndex) {
-        nextSectionIndex = idx;
-      }
-    }
-  });
+  // --- STEP 1: Find the target section using keyword matching ---
+  const targetKeywords = SECTION_KEYWORDS[sectionName] ?? sectionName.toLowerCase().split(/[\s&]+/).filter(Boolean);
 
-  // Extract the text block of our section
-  const sectionBlock = rawText.slice(sectionIndex + sectionName.length, nextSectionIndex).trim();
+  // Score every line: a line is a section heading if it contains 2+ of the target keywords
+  const isSectionLine = (line: string, keywords: string[]) => {
+    const lower = line.toLowerCase();
+    const hits = keywords.filter(kw => lower.includes(kw)).length;
+    return hits >= 2 && line.trim().length > 0 && line.trim().length < 120; // Headings are short
+  };
 
-  // Split the section block into lines/bullet points
-  const lines = sectionBlock.split('\n');
-  const bulletPoints: string[] = [];
-
-  let currentPoint = '';
-
+  let sectionLineIndex = -1;
   for (let i = 0; i < lines.length; i++) {
-    const line = lines[i].trim();
-    if (!line) continue;
-
-    // Check if the line starts a new bullet point (starts with -, *, •, or digit+dot)
-    const isNewBullet = /^[•\-\*]\s+/.test(line) || /^\d+\.\s+/.test(line);
-
-    if (isNewBullet) {
-      if (currentPoint) {
-        bulletPoints.push(currentPoint.trim());
-      }
-      currentPoint = line.replace(/^[•\-\*]\s+/, '').replace(/^\d+\.\s+/, '');
-    } else {
-      if (currentPoint) {
-        currentPoint += ' ' + line;
-      } else {
-        currentPoint = line;
-      }
+    if (isSectionLine(lines[i], targetKeywords)) {
+      sectionLineIndex = i;
+      break;
     }
   }
+  if (sectionLineIndex === -1) return null;
 
-  if (currentPoint) {
+  // --- STEP 2: Find where the NEXT section starts to bound our extraction ---
+  const otherSectionKeywordSets = Object.entries(SECTION_KEYWORDS)
+    .filter(([key]) => key !== sectionName)
+    .map(([, kws]) => kws);
+
+  let nextSectionLineIndex = lines.length;
+  for (let i = sectionLineIndex + 1; i < lines.length; i++) {
+    for (const kwSet of otherSectionKeywordSets) {
+      if (isSectionLine(lines[i], kwSet)) {
+        nextSectionLineIndex = i;
+        break;
+      }
+    }
+    if (nextSectionLineIndex < lines.length) break;
+  }
+
+  // --- STEP 3: Parse bullet points from the section block ---
+  const sectionLines = lines.slice(sectionLineIndex + 1, nextSectionLineIndex);
+  const bulletPoints: string[] = [];
+  let currentPoint = '';
+  let inBullet = false;
+
+  for (let i = 0; i < sectionLines.length; i++) {
+    const raw = sectionLines[i];
+    const trimmed = raw.trim();
+
+    if (!trimmed) continue;
+
+    // Format A — standalone dash/bullet marker on its own line (new Spark format)
+    const isStandaloneBullet = /^[-*•]$/.test(trimmed);
+    // Format B — inline bullet: "• text", "- text", "* text", "1. text"
+    const isInlineBullet = /^[•\-\*]\s+\S/.test(trimmed) || /^\d+\.\s+\S/.test(trimmed);
+
+    if (isStandaloneBullet) {
+      // Save the previous bullet if any
+      if (currentPoint.trim()) {
+        bulletPoints.push(currentPoint.trim());
+      }
+      currentPoint = '';
+      inBullet = true;
+    } else if (isInlineBullet) {
+      if (currentPoint.trim()) {
+        bulletPoints.push(currentPoint.trim());
+      }
+      currentPoint = trimmed.replace(/^[•\-\*]\s+/, '').replace(/^\d+\.\s+/, '');
+      inBullet = true;
+    } else if (inBullet) {
+      // Continuation content: append to current bullet (indented lines, Sources lines, etc.)
+      currentPoint = currentPoint ? `${currentPoint} ${trimmed}` : trimmed;
+    }
+    // Lines before the first bullet (e.g., date sub-heading) are ignored
+  }
+
+  // Push the last bullet
+  if (currentPoint.trim()) {
     bulletPoints.push(currentPoint.trim());
   }
 
-  // Return the selected post number (1-indexed)
+  // --- STEP 4: Return the selected post number (1-indexed) ---
   if (postNumber <= bulletPoints.length) {
     return bulletPoints[postNumber - 1];
   }
 
   return null;
 }
+
 
 interface Post {
   id: string;
