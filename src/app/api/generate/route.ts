@@ -257,6 +257,20 @@ function formatSmartXFallback(cleanText: string): string {
   return `🤖 ${title.toUpperCase()}\n\n• ${truncatedBody}${hashtags}`;
 }
 
+// Hard-cap enforcer: guarantees the final X post (including source URL) never exceeds 280 characters.
+// This is the last line of defense before saving to the database.
+function enforceXLimit(text: string): string {
+  const LIMIT = 280;
+  if (text.length <= LIMIT) return text;
+
+  // Try to find a clean word boundary to cut at
+  const cutAt = text.lastIndexOf(' ', LIMIT - 3);
+  if (cutAt > LIMIT / 2) {
+    return text.slice(0, cutAt) + '...';
+  }
+  return text.slice(0, LIMIT - 3) + '...';
+}
+
 export async function POST(request: Request) {
   try {
     const body = await request.json();
@@ -278,7 +292,11 @@ export async function POST(request: Request) {
     const model = genAI.getGenerativeModel({
       model: 'gemini-2.0-flash',
       systemInstruction:
-        'Take this raw daily robotics news digest and output a JSON object containing three fields: x_post (a short, punchy summary with bullet points formatted for X), reddit_post (a detailed, discussion-oriented version for a subreddit), and image_prompt (a detailed, descriptive prompt for an image generator representing the most interesting news item in the text, e.g. a specific humanoid robot or laboratory setting. Style should be futuristic white and glowing high-shine blue robot accents in a dark tech environment). Do not use markdown blocks in the JSON.',
+        'Take this raw daily robotics news digest and output a JSON object with three fields:\n' +
+        '- x_post: A punchy 1-3 line tweet for X (Twitter). STRICT RULE: the x_post body MUST be under 200 characters total (not including any source link). Use 1-2 bullet points max with an emoji opener. NO hashtags inside x_post (they are added automatically). Never exceed 200 characters in x_post.\n' +
+        '- reddit_post: A detailed, discussion-oriented post for a subreddit with a bold title, body paragraphs, and a call to discussion.\n' +
+        '- image_prompt: A detailed descriptive prompt for an AI image generator representing the most interesting news item. Style: futuristic white and glowing high-shine blue robot in a dark tech environment.\n' +
+        'Output valid JSON only. Do not wrap in markdown code blocks.',
       generationConfig: {
         responseMimeType: 'application/json',
         responseSchema: {
@@ -365,11 +383,25 @@ export async function POST(request: Request) {
       imageUrl = await generateImage(imagePrompt);
     }
 
-    // 2.5 Programmatically append the source link to the end of the posts if present
+    // 2.5 Programmatically append the source link to the end of the posts if present,
+    // then hard-enforce the 280-character limit on the X post so it is ALWAYS publishable.
     if (blogUrl) {
-      xPostText = `${xPostText}\n\nSource: ${blogUrl}`;
+      // Reserve space: calculate how many chars remain after the source suffix
+      const sourceSuffix = `\n\nSource: ${blogUrl}`;
+      const maxBodyForX = 280 - sourceSuffix.length;
+      if (xPostText.length > maxBodyForX) {
+        const cutAt = xPostText.lastIndexOf(' ', maxBodyForX - 3);
+        xPostText = cutAt > maxBodyForX / 2
+          ? xPostText.slice(0, cutAt) + '...'
+          : xPostText.slice(0, maxBodyForX - 3) + '...';
+      }
+      xPostText = `${xPostText}${sourceSuffix}`;
       redditPostText = `${redditPostText}\n\n[Read full article](${blogUrl})`;
     }
+
+    // Final safety pass — enforces 280 chars even if there was no source URL
+    xPostText = enforceXLimit(xPostText);
+    console.log(`[Generate API] Final X post length: ${xPostText.length} chars`);
 
     // 3. Update Supabase record with generated texts, image URL, and status 'READY'
     console.log(`[Generate API] Saving generated content to database for post ${postId}...`);
