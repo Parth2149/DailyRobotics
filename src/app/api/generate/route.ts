@@ -196,51 +196,126 @@ function extractFirstLink(text: string): string | null {
   return unwrapGoogleUrl(url);
 }
 
-// Scrape HTML of the target webpage to retrieve Open Graph image tags
+// Extract ALL unique URLs from digest text (supports all the same formats as extractFirstLink).
+// Returns them in document order, deduplicated, with Google redirects unwrapped.
+// This is used to try multiple source links when scraping article images.
+function extractAllLinks(text: string): string[] {
+  const seen = new Set<string>();
+  const results: string[] = [];
+
+  const addUrl = (raw: string) => {
+    const cleaned = raw.replace(/[.,;:!?'")\]]+$/, '');
+    const resolved = unwrapGoogleUrl(cleaned);
+    if (resolved && !seen.has(resolved)) {
+      // Skip bare domain roots (e.g. https://humanoid.press/) — they usually return logos
+      try {
+        const obj = new URL(resolved);
+        const hasPath = obj.pathname.length > 1; // more than just "/"
+        seen.add(resolved);
+        // Push article URLs first, bare domains last
+        if (hasPath) results.unshift(resolved);
+        else results.push(resolved);
+      } catch { /* invalid URL, skip */ }
+    }
+  };
+
+  // Standard markdown links [Label](url)
+  const mdRegex = /\[[^\]]+\]\((https?:\/\/[^)\s]+)\)/g;
+  let m: RegExpExecArray | null;
+  while ((m = mdRegex.exec(text)) !== null) addUrl(m[1]);
+
+  // URL-as-link-text [https://url]()
+  const urlTextRegex = /\[(https?:\/\/[^\]]+)\]\(\s*\)/g;
+  while ((m = urlTextRegex.exec(text)) !== null) addUrl(m[1].trim());
+
+  // Raw URLs in the text (allow & for Google redirects)
+  const rawRegex = /(https?:\/\/[^\s\)\],]+)/g;
+  while ((m = rawRegex.exec(text)) !== null) addUrl(m[1]);
+
+  return results;
+}
+
+
+function isLikelyLogo(imgUrl: string): boolean {
+  const lower = imgUrl.toLowerCase();
+  return (
+    /logo|icon|favicon|sprite|brand|avatar|profile|placeholder|fallback|default|generic|thumbnail\/logo/i.test(lower) ||
+    // Tiny size hints embedded in URL (e.g. ?w=32 or -32x32)
+    /[\-_]\d{1,2}x\d{1,2}[\-_.]/.test(lower) ||
+    /[?&]w=(\d+)/.test(lower) && parseInt((lower.match(/[?&]w=(\d+)/) || [])[1] || '9999') < 200
+  );
+}
+
+// Resolve a potentially relative/protocol-relative image URL to absolute
+function resolveImgUrl(imgUrl: string, pageUrl: string): string {
+  if (imgUrl.startsWith('//')) return `https:${imgUrl}`;
+  if (imgUrl.startsWith('/')) {
+    try { return `${new URL(pageUrl).origin}${imgUrl}`; } catch { return imgUrl; }
+  }
+  return imgUrl;
+}
+
+// Scrape the target page HTML and extract the best Open Graph / Twitter Card image.
+// Uses Twitterbot User-Agent so sites serve full meta tags for social crawlers.
+// Collects ALL og:image candidates, filters logos, returns the best one.
 async function getOgImage(url: string): Promise<string | null> {
   const controller = new AbortController();
-  const timeoutId = setTimeout(() => controller.abort(), 7000); // 7s timeout
+  const timeoutId = setTimeout(() => controller.abort(), 8000);
   try {
     console.log(`[Scraper] Fetching HTML from ${url}...`);
 
-    const res = await fetch(url, { 
+    const res = await fetch(url, {
       signal: controller.signal,
       headers: {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+        // Twitterbot UA: social crawlers are almost never blocked and get full OG meta
+        'User-Agent': 'Twitterbot/1.0',
+        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+        'Accept-Language': 'en-US,en;q=0.5',
       }
     });
     clearTimeout(timeoutId);
 
     if (!res.ok) {
-      console.warn(`[Scraper] Failed to fetch page: ${res.statusText}`);
+      console.warn(`[Scraper] ${url} returned ${res.status} ${res.statusText}`);
       return null;
     }
 
-    const html = await res.text();
+    // Only read up to ~100KB to avoid memory issues on large pages
+    const rawText = await res.text();
+    const html = rawText.slice(0, 100_000);
 
-    // Regex to match og:image or twitter:image metadata tags (both attribute orderings)
-    const ogImageRegex = /<meta\s+[^>]*property=["']og:image["']\s+[^>]*content=["']([^"']+)["']/i;
-    const ogImageRegexAlt = /<meta\s+[^>]*content=["']([^"']+)["']\s+[^>]*property=["']og:image["']/i;
-    const twitterImageRegex = /<meta\s+[^>]*name=["']twitter:image["']\s+[^>]*content=["']([^"']+)["']/i;
-    const twitterImageRegexAlt = /<meta\s+[^>]*content=["']([^"']+)["']\s+[^>]*name=["']twitter:image["']/i;
+    // Collect ALL og:image and twitter:image URLs (sites can have multiple)
+    const candidates: string[] = [];
+    const patterns = [
+      // property="og:image" content="url"
+      /<meta[^>]+property=["']og:image["'][^>]*content=["']([^"']+)["']/gi,
+      // content="url" property="og:image"
+      /<meta[^>]+content=["']([^"']+)["'][^>]+property=["']og:image["']/gi,
+      // name="twitter:image" content="url"  (both orderings)
+      /<meta[^>]+name=["']twitter:image(?::src)?["'][^>]*content=["']([^"']+)["']/gi,
+      /<meta[^>]+content=["']([^"']+)["'][^>]+name=["']twitter:image(?::src)?["']/gi,
+    ];
 
-    const match = html.match(ogImageRegex) || html.match(ogImageRegexAlt) || html.match(twitterImageRegex) || html.match(twitterImageRegexAlt);
-    if (match && match[1]) {
-      let imgUrl = match[1];
-      // Handle protocol-relative URLs like //example.com/image.jpg
-      if (imgUrl.startsWith('//')) {
-        imgUrl = `https:${imgUrl}`;
-      } else if (imgUrl.startsWith('/')) {
-        // Handle root-relative URLs
-        const urlObj = new URL(url);
-        imgUrl = `${urlObj.origin}${imgUrl}`;
+    for (const regex of patterns) {
+      let m: RegExpExecArray | null;
+      while ((m = regex.exec(html)) !== null) {
+        if (m[1]) candidates.push(resolveImgUrl(m[1], url));
       }
-      console.log(`[Scraper] Successfully found Open Graph image: ${imgUrl}`);
-      return imgUrl;
+    }
+
+    console.log(`[Scraper] Found ${candidates.length} og/twitter image candidate(s):`, candidates);
+
+    // Score candidates: prefer non-logo, non-icon images
+    const good = candidates.filter(c => !isLikelyLogo(c));
+    const best = good.length > 0 ? good[0] : candidates[0];
+
+    if (best) {
+      console.log(`[Scraper] Selected image: ${best}`);
+      return best;
     }
   } catch (err: any) {
     clearTimeout(timeoutId);
-    console.warn(`[Scraper] Error scraping URL ${url}:`, err.message || err);
+    console.warn(`[Scraper] Error scraping ${url}:`, err.message || err);
   }
   return null;
 }
@@ -408,16 +483,24 @@ export async function POST(request: Request) {
       imagePrompt = `A futuristic white and glowing high-shine blue robot representing: ${firstWords || 'robotics technology'}, in a dark tech environment.`;
     }
 
-    // 1.5 Extract first link and attempt to fetch its Open Graph thumbnail image to save credits
-    const blogUrl = extractFirstLink(raw_spark_text);
+    // 1.5 Extract ALL links from the text and try each one for a good article image.
+    // We try every URL so we skip site-root links (which return logos) and find the
+    // best article-specific image (like the Forbes chart above).
+    const allLinks = extractAllLinks(raw_spark_text);
+    const blogUrl = allLinks[0] ?? null; // Primary link used for citation
     let imageUrl = '';
 
-    if (blogUrl) {
-      console.log(`[Generate API] Found blog link: ${blogUrl}. Attempting to scrape Open Graph image...`);
-      const ogImage = await getOgImage(blogUrl);
-      if (ogImage) {
-        imageUrl = ogImage;
-        console.log(`[Generate API] Scraped Open Graph image successfully: ${imageUrl}`);
+    if (allLinks.length > 0) {
+      console.log(`[Generate API] Found ${allLinks.length} link(s) to try for image scraping:`, allLinks);
+      for (const link of allLinks) {
+        const ogImage = await getOgImage(link);
+        if (ogImage) {
+          imageUrl = ogImage;
+          console.log(`[Generate API] ✅ Using scraped image from ${link}: ${imageUrl}`);
+          break; // Stop as soon as we get a good non-logo image
+        } else {
+          console.log(`[Generate API] ⚠ No good image from ${link}, trying next...`);
+        }
       }
     }
 
