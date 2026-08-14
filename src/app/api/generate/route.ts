@@ -111,45 +111,89 @@ async function generateImage(prompt: string): Promise<string> {
   return pollinationsUrl;
 }
 
-// Extract the first http/https URL link in the text (supporting markdown or raw URLs)
+// Helper: attempt to unwrap a Google redirect URL and return the real target URL
+function unwrapGoogleUrl(raw: string): string | null {
+  // Strip trailing punctuation first
+  const cleaned = raw.replace(/[.,;:!?'")\]]+$/, '');
+  if (!cleaned.includes('google.com/url')) return cleaned || null;
+
+  // Strategy 1: URL constructor (works if URL is well-formed)
+  try {
+    const obj = new URL(cleaned);
+    const q = obj.searchParams.get('q');
+    if (q) {
+      console.log(`[Link Extractor] Unwrapped Google redirect → ${q}`);
+      return q;
+    }
+  } catch { /* fall through */ }
+
+  // Strategy 2: regex extraction of q= value (handles partial/malformed URLs)
+  const qMatch = cleaned.match(/[?&]q=([^&\s]+)/);
+  if (qMatch?.[1]) {
+    try {
+      const decoded = decodeURIComponent(qMatch[1]);
+      console.log(`[Link Extractor] Regex-extracted Google redirect q= → ${decoded}`);
+      return decoded;
+    } catch { /* fall through */ }
+  }
+
+  return cleaned;
+}
+
+// Extract the first meaningful http/https URL from digest text.
+// Uses 4 strategies in order to handle all Apps-Script output formats:
+//   1. Standard markdown link  [Label](https://real-url)
+//   2. URL-as-link-text        [https://google-redirect](  )  ← Apps Script loses href
+//   3. Source: / Link: prefixes with raw URL text
+//   4. Any raw URL anywhere in the text (allow & for Google redirects)
 function extractFirstLink(text: string): string | null {
-  // Regex to match markdown links: [Label](URL) — stops at ) or trailing &
-  const markdownRegex = /\[[^\]]+\]\((https?:\/\/[^)\s]+)\)/;
-  const matchMarkdown = text.match(markdownRegex);
   let url: string | null = null;
 
-  if (matchMarkdown && matchMarkdown[1]) {
-    url = matchMarkdown[1];
-  } else {
-    // Fallback to standard URL regex (excluding trailing punctuation/parentheses/ampersands)
-    const urlRegex = /(https?:\/\/[^\s\)\],&]+)/;
-    const matchUrl = text.match(urlRegex);
-    if (matchUrl && matchUrl[1]) {
-      url = matchUrl[1];
+  // ── Strategy 1: standard markdown link with non-empty href ────────────────
+  const markdownMatch = text.match(/\[[^\]]+\]\((https?:\/\/[^)\s]+)\)/);
+  if (markdownMatch?.[1]) {
+    url = markdownMatch[1];
+  }
+
+  // ── Strategy 2: URL inside brackets with empty href  [https://...](   ) ──
+  // This happens when Apps Script captures the href but Google's forwarded-email
+  // HTML places the raw URL as the visible anchor text instead.
+  if (!url) {
+    const urlAsTextMatch = text.match(/\[(https?:\/\/[^\]]+)\]\(\s*\)/);
+    if (urlAsTextMatch?.[1]) {
+      url = urlAsTextMatch[1].trim();
+      console.log(`[Link Extractor] Found URL in bracket-text (empty href): ${url}`);
     }
   }
 
-  if (url) {
-    // Strip any remaining trailing punctuation that may have been captured
-    url = url.replace(/[.,;:!?]+$/, '');
-
-    // Gmail rewrites links to google.com/url?q=real_url. We unwrap it so the scraper hits the real page!
-    if (url.includes('google.com/url?') && url.includes('q=')) {
-      try {
-        const urlObj = new URL(url);
-        const realUrl = urlObj.searchParams.get('q');
-        if (realUrl) {
-          console.log(`[Link Extractor] Unwrapped Google redirect URL: ${realUrl}`);
-          return realUrl;
-        }
-      } catch (err: any) {
-        console.warn('[Link Extractor] Failed to unwrap Google redirect URL:', err.message || err);
-      }
+  // ── Strategy 3: "Source: URL" / "Link: URL" lines ────────────────────────
+  // Digest emails often have "Sources: [Label](URL)" or "Link: https://..."
+  if (!url) {
+    const sourceLinkMatch = text.match(
+      /(?:Sources?|Link)\s*:\s*(?:\[[^\]]*\]\s*\()?\s*(https?:\/\/[^\s\)\]]+)/i
+    );
+    if (sourceLinkMatch?.[1]) {
+      url = sourceLinkMatch[1].trim();
+      console.log(`[Link Extractor] Found URL in Source/Link prefix: ${url}`);
     }
-    return url;
   }
 
-  return null;
+  // ── Strategy 4: any raw URL in the text (allow & for Google redirects) ───
+  if (!url) {
+    const rawUrlMatch = text.match(/(https?:\/\/[^\s\)\],]+)/);
+    if (rawUrlMatch?.[1]) {
+      url = rawUrlMatch[1];
+      console.log(`[Link Extractor] Found raw URL fallback: ${url}`);
+    }
+  }
+
+  if (!url) return null;
+
+  // Strip any trailing punctuation picked up from surrounding text
+  url = url.replace(/[.,;:!?'")\]]+$/, '');
+
+  // Unwrap Google redirect URLs (google.com/url?q=...) to get the real target
+  return unwrapGoogleUrl(url);
 }
 
 // Scrape HTML of the target webpage to retrieve Open Graph image tags
