@@ -4,6 +4,20 @@ import { supabaseServer } from '@/lib/supabase';
 // GET: Fetch real-time counts and all posts with status 'READY'
 export async function GET() {
   try {
+    // Auto-cleanup: delete RECEIVED posts older than 24 hours so old digests
+    // never accumulate in the inbox. Runs silently — errors don't block the response.
+    const cutoff = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
+    const { error: cleanupError, count: cleanupCount } = await supabaseServer
+      .from('posts')
+      .delete({ count: 'exact' })
+      .eq('status', 'RECEIVED')
+      .lt('created_at', cutoff);
+    if (cleanupError) {
+      console.warn('[Posts API] Auto-cleanup error (non-fatal):', cleanupError.message);
+    } else if (cleanupCount && cleanupCount > 0) {
+      console.log(`[Posts API] Auto-cleaned ${cleanupCount} stale RECEIVED post(s) older than 24h.`);
+    }
+
     // Run all 6 DB queries in parallel for maximum performance
     const [
       receivedResult,
@@ -53,6 +67,7 @@ export async function GET() {
     return NextResponse.json({ error: error.message || 'Internal Server Error' }, { status: 500 });
   }
 }
+
 
 // PUT: Save manual edits to a post's text fields
 export async function PUT(request: Request) {
