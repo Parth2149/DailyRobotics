@@ -2,8 +2,9 @@ import { NextResponse } from 'next/server';
 import { GoogleGenerativeAI, SchemaType } from '@google/generative-ai';
 import { supabaseServer } from '@/lib/supabase';
 
-// Increased timeout limit for Vercel Serverless Functions during AI text & image generation
-export const maxDuration = 60;
+// Increased timeout limit for Vercel Serverless Functions during AI text, image scraping & Gemini Vision selection
+export const maxDuration = 120;
+
 
 // Helper to upload image buffers to Supabase Storage
 async function uploadToSupabaseStorage(buffer: Buffer): Promise<string | null> {
@@ -255,43 +256,60 @@ function resolveImgUrl(imgUrl: string, pageUrl: string): string {
   return imgUrl;
 }
 
-// Scrape the target page HTML and extract the best Open Graph / Twitter Card image.
-// Uses Twitterbot User-Agent so sites serve full meta tags for social crawlers.
-// Collects ALL og:image candidates, filters logos, returns the best one.
-async function getOgImage(url: string): Promise<string | null> {
+// Scrape the target page and return ALL Open Graph / Twitter Card image URLs found.
+// Uses Twitterbot UA so social sites serve full meta tags.
+// Returns raw candidates — filtering/selection is done by Gemini Vision.
+async function getOgImageCandidates(url: string): Promise<string[]> {
   const controller = new AbortController();
   const timeoutId = setTimeout(() => controller.abort(), 8000);
   try {
-    console.log(`[Scraper] Fetching HTML from ${url}...`);
+    console.log(`[Scraper] Fetching ${url}...`);
 
-    const res = await fetch(url, {
-      signal: controller.signal,
-      headers: {
-        // Twitterbot UA: social crawlers are almost never blocked and get full OG meta
-        'User-Agent': 'Twitterbot/1.0',
-        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
-        'Accept-Language': 'en-US,en;q=0.5',
+    // Try Twitterbot first; fall back to facebookexternalhit if needed
+    const userAgents = [
+      'Twitterbot/1.0',
+      'facebookexternalhit/1.1',
+      'LinkedInBot/1.0',
+    ];
+
+    let html = '';
+    for (const ua of userAgents) {
+      const ctrl = new AbortController();
+      const tid = setTimeout(() => ctrl.abort(), 7000);
+      try {
+        const res = await fetch(url, {
+          signal: ctrl.signal,
+          headers: {
+            'User-Agent': ua,
+            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+            'Accept-Language': 'en-US,en;q=0.5',
+          }
+        });
+        clearTimeout(tid);
+        if (res.ok) {
+          const rawText = await res.text();
+          html = rawText.slice(0, 150_000); // read up to 150KB
+          console.log(`[Scraper] Got HTML via ${ua} (${html.length} chars)`);
+          break;
+        } else {
+          console.warn(`[Scraper] ${ua} got ${res.status} for ${url}`);
+        }
+      } catch (e: any) {
+        clearTimeout(tid);
+        console.warn(`[Scraper] ${ua} failed:`, e.message || e);
       }
-    });
-    clearTimeout(timeoutId);
-
-    if (!res.ok) {
-      console.warn(`[Scraper] ${url} returned ${res.status} ${res.statusText}`);
-      return null;
     }
 
-    // Only read up to ~100KB to avoid memory issues on large pages
-    const rawText = await res.text();
-    const html = rawText.slice(0, 100_000);
+    clearTimeout(timeoutId);
+    if (!html) return [];
 
-    // Collect ALL og:image and twitter:image URLs (sites can have multiple)
+    // Collect ALL og:image and twitter:image URLs (sites often have multiple)
+    const seen = new Set<string>();
     const candidates: string[] = [];
+
     const patterns = [
-      // property="og:image" content="url"
-      /<meta[^>]+property=["']og:image["'][^>]*content=["']([^"']+)["']/gi,
-      // content="url" property="og:image"
-      /<meta[^>]+content=["']([^"']+)["'][^>]+property=["']og:image["']/gi,
-      // name="twitter:image" content="url"  (both orderings)
+      /<meta[^>]+property=["']og:image(?::secure_url)?["'][^>]*content=["']([^"']+)["']/gi,
+      /<meta[^>]+content=["']([^"']+)["'][^>]+property=["']og:image(?::secure_url)?["']/gi,
       /<meta[^>]+name=["']twitter:image(?::src)?["'][^>]*content=["']([^"']+)["']/gi,
       /<meta[^>]+content=["']([^"']+)["'][^>]+name=["']twitter:image(?::src)?["']/gi,
     ];
@@ -299,25 +317,127 @@ async function getOgImage(url: string): Promise<string | null> {
     for (const regex of patterns) {
       let m: RegExpExecArray | null;
       while ((m = regex.exec(html)) !== null) {
-        if (m[1]) candidates.push(resolveImgUrl(m[1], url));
+        const resolved = resolveImgUrl(m[1], url);
+        if (!seen.has(resolved)) {
+          seen.add(resolved);
+          candidates.push(resolved);
+        }
       }
     }
 
-    console.log(`[Scraper] Found ${candidates.length} og/twitter image candidate(s):`, candidates);
-
-    // Score candidates: prefer non-logo, non-icon images
-    const good = candidates.filter(c => !isLikelyLogo(c));
-    const best = good.length > 0 ? good[0] : candidates[0];
-
-    if (best) {
-      console.log(`[Scraper] Selected image: ${best}`);
-      return best;
-    }
+    console.log(`[Scraper] ${candidates.length} image candidate(s) from ${url}:`, candidates);
+    return candidates;
   } catch (err: any) {
     clearTimeout(timeoutId);
     console.warn(`[Scraper] Error scraping ${url}:`, err.message || err);
   }
-  return null;
+  return [];
+}
+
+// Download an image URL and return its base64 data + MIME type for Gemini Vision.
+// Returns null if the download fails, times out, or the image is too large.
+async function fetchImageBase64(url: string): Promise<{ data: string; mimeType: string } | null> {
+  const ctrl = new AbortController();
+  const tid = setTimeout(() => ctrl.abort(), 6000);
+  try {
+    const res = await fetch(url, {
+      signal: ctrl.signal,
+      headers: { 'User-Agent': 'Twitterbot/1.0' }
+    });
+    clearTimeout(tid);
+    if (!res.ok) return null;
+
+    const contentType = res.headers.get('content-type') || 'image/jpeg';
+    const mimeType = contentType.split(';')[0].trim();
+    if (!mimeType.startsWith('image/')) return null;
+
+    const arrayBuffer = await res.arrayBuffer();
+    // Skip very large images (> 2 MB) to keep Gemini request size manageable
+    if (arrayBuffer.byteLength > 2 * 1024 * 1024) {
+      console.warn(`[Scraper] Image too large (${arrayBuffer.byteLength} bytes): ${url}`);
+      return null;
+    }
+
+    const data = Buffer.from(arrayBuffer).toString('base64');
+    return { data, mimeType };
+  } catch (err: any) {
+    clearTimeout(tid);
+    console.warn(`[Scraper] fetchImageBase64 failed for ${url}:`, err.message || err);
+    return null;
+  }
+}
+
+// Use Gemini Vision to pick the best image from a set of candidates.
+// Sends up to 6 images visually and asks Gemini to select the most
+// article-relevant one (robot photos, charts, product shots).
+async function selectBestImageWithGemini(
+  genAI: GoogleGenerativeAI,
+  candidates: string[],
+  articleContext: string
+): Promise<string | null> {
+  if (candidates.length === 0) return null;
+  if (candidates.length === 1) return candidates[0];
+
+  // Cap at 6 candidates to keep Gemini request lean
+  const limited = candidates.slice(0, 6);
+
+  console.log(`[Gemini Vision] Downloading ${limited.length} candidate images for selection...`);
+
+  // Download all images in parallel
+  const downloaded = await Promise.all(
+    limited.map(async (url) => {
+      const img = await fetchImageBase64(url);
+      return img ? { url, ...img } : null;
+    })
+  );
+
+  const valid = downloaded.filter((d): d is { url: string; data: string; mimeType: string } => d !== null);
+
+  if (valid.length === 0) {
+    console.warn('[Gemini Vision] No images could be downloaded. Using first candidate URL.');
+    return candidates[0];
+  }
+  if (valid.length === 1) {
+    return valid[0].url;
+  }
+
+  console.log(`[Gemini Vision] Sending ${valid.length} images to Gemini for best-pick selection...`);
+
+  // Build Gemini multimodal request
+  const parts: Array<{ text: string } | { inlineData: { data: string; mimeType: string } }> = [
+    {
+      text:
+        `You are selecting the best thumbnail image for a robotics and AI news article.\n\n` +
+        `Article context: "${articleContext.slice(0, 400)}"\n\n` +
+        `I will show you ${valid.length} candidate images (labelled 0 to ${valid.length - 1}).\n\n` +
+        `Pick the image that BEST represents the article. ` +
+        `STRONGLY PREFER: article-specific photos, robot photos, charts/graphs, product shots, screenshots of tech.\n` +
+        `STRONGLY AVOID: site logos, small icons, generic stock images, author headshots, brand marks.\n\n` +
+        `Reply with ONLY the index number of the best image (e.g. "2"). No explanation.`
+    }
+  ];
+
+  for (let i = 0; i < valid.length; i++) {
+    parts.push({ text: `Image ${i}:` });
+    parts.push({ inlineData: { data: valid[i].data, mimeType: valid[i].mimeType } });
+  }
+
+  try {
+    const visionModel = genAI.getGenerativeModel({ model: 'gemini-2.0-flash' });
+    const result = await visionModel.generateContent(parts);
+    const answer = result.response.text().trim().replace(/[^\d]/g, '');
+    const idx = parseInt(answer, 10);
+    if (!isNaN(idx) && idx >= 0 && idx < valid.length) {
+      console.log(`[Gemini Vision] ✅ Selected image index ${idx}: ${valid[idx].url}`);
+      return valid[idx].url;
+    }
+    console.warn(`[Gemini Vision] Unexpected answer "${answer}", falling back to first valid image.`);
+  } catch (err: any) {
+    console.warn('[Gemini Vision] Image selection call failed:', err.message || err);
+  }
+
+  // Fallback: return first valid image
+  return valid[0].url;
 }
 
 // Clean up raw URLs, duplicate brackets, and trailing spacing/commas from text
@@ -483,23 +603,35 @@ export async function POST(request: Request) {
       imagePrompt = `A futuristic white and glowing high-shine blue robot representing: ${firstWords || 'robotics technology'}, in a dark tech environment.`;
     }
 
-    // 1.5 Extract ALL links from the text and try each one for a good article image.
-    // We try every URL so we skip site-root links (which return logos) and find the
-    // best article-specific image (like the Forbes chart above).
+    // 1.5 Collect ALL og:image candidates from ALL source URLs, then let Gemini Vision
+    // visually inspect them and pick the best article-relevant image.
     const allLinks = extractAllLinks(raw_spark_text);
     const blogUrl = allLinks[0] ?? null; // Primary link used for citation
     let imageUrl = '';
 
     if (allLinks.length > 0) {
-      console.log(`[Generate API] Found ${allLinks.length} link(s) to try for image scraping:`, allLinks);
-      for (const link of allLinks) {
-        const ogImage = await getOgImage(link);
-        if (ogImage) {
-          imageUrl = ogImage;
-          console.log(`[Generate API] ✅ Using scraped image from ${link}: ${imageUrl}`);
-          break; // Stop as soon as we get a good non-logo image
-        } else {
-          console.log(`[Generate API] ⚠ No good image from ${link}, trying next...`);
+      console.log(`[Generate API] Scraping images from ${allLinks.length} link(s):`, allLinks);
+
+      // Collect candidates from ALL source URLs in parallel
+      const perUrlCandidates = await Promise.all(allLinks.map(link => getOgImageCandidates(link)));
+      const allCandidates = perUrlCandidates.flat();
+
+      // Deduplicate preserving order
+      const seenCandidates = new Set<string>();
+      const uniqueCandidates = allCandidates.filter(c => {
+        if (seenCandidates.has(c)) return false;
+        seenCandidates.add(c);
+        return true;
+      });
+
+      console.log(`[Generate API] Total unique image candidates: ${uniqueCandidates.length}`, uniqueCandidates);
+
+      if (uniqueCandidates.length > 0) {
+        // Let Gemini Vision visually inspect and select the best image
+        const chosen = await selectBestImageWithGemini(genAI, uniqueCandidates, raw_spark_text);
+        if (chosen) {
+          imageUrl = chosen;
+          console.log(`[Generate API] ✅ Gemini Vision chose: ${imageUrl}`);
         }
       }
     }

@@ -207,8 +207,9 @@ export default function Dashboard() {
         setInboxPosts(inboxList);
         setSubreddit(data.subreddit || 'test');
         
-        // Auto-load the latest inbox post if the simulator is currently empty
-        if (inboxList.length > 0 && !simText && !fullDigestText) {
+        // Auto-load the NEWEST inbox post into the simulator only on first load
+        // (when no post has been manually loaded yet and the simulator is empty)
+        if (inboxList.length > 0 && !simText && !fullDigestText && !activeInboxPostId) {
           setSimText(inboxList[0].raw_spark_text);
           setFullDigestText(inboxList[0].raw_spark_text);
           setActiveInboxPostId(inboxList[0].id);
@@ -751,20 +752,39 @@ export default function Dashboard() {
               <div key={post.id} className="p-4 glass-panel rounded-2xl border border-brand-cyan/20 flex flex-col gap-3 transition-all hover:border-brand-cyan/40">
                 <div className="flex items-center justify-between text-[10px] text-slate-500 font-medium">
                   <span>Received via Email</span>
-                  <span>
+                  <span className="flex items-center gap-1.5">
+                    {new Date(post.created_at).toLocaleDateString([], { month: 'short', day: 'numeric' })}{' '}
                     {new Date(post.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
                   </span>
                 </div>
                 <p className="text-xs text-slate-300 line-clamp-3 leading-relaxed font-mono">
                   {post.raw_spark_text}
                 </p>
-                <button
-                  onClick={() => handleLoadIntoSimulator(post)}
-                  className="mt-1 py-2 w-full rounded-xl bg-brand-cyan/10 hover:bg-brand-cyan/20 text-brand-cyan text-xs font-bold flex items-center justify-center gap-1.5 transition-all border border-brand-cyan/20 cursor-pointer"
-                >
-                  <Database className="w-3.5 h-3.5" />
-                  Load into Webhook Simulator
-                </button>
+                <div className="flex gap-2 mt-1">
+                  <button
+                    onClick={() => handleLoadIntoSimulator(post)}
+                    className="flex-1 py-2 rounded-xl bg-brand-cyan/10 hover:bg-brand-cyan/20 text-brand-cyan text-xs font-bold flex items-center justify-center gap-1.5 transition-all border border-brand-cyan/20 cursor-pointer"
+                  >
+                    <Database className="w-3.5 h-3.5" />
+                    Load into Simulator
+                  </button>
+                  <button
+                    onClick={async () => {
+                      if (!confirm('Delete this inbox post?')) return;
+                      await fetch('/api/posts', { method: 'DELETE', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ postId: post.id }) });
+                      if (activeInboxPostId === post.id) {
+                        setSimText('');
+                        setFullDigestText('');
+                        setActiveInboxPostId(null);
+                      }
+                      loadDashboardData();
+                    }}
+                    className="px-3 py-2 rounded-xl bg-red-500/10 hover:bg-red-500/20 text-red-400 text-xs font-bold flex items-center justify-center gap-1 transition-all border border-red-500/20 cursor-pointer"
+                    title="Delete this inbox post"
+                  >
+                    🗑
+                  </button>
+                </div>
               </div>
             ))}
           </div>
