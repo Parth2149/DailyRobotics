@@ -3,6 +3,8 @@ import sys
 import time
 import urllib.parse
 import requests
+import subprocess
+import shlex
 from dotenv import load_dotenv
 
 # Try to import supabase library, notify user if missing
@@ -29,28 +31,42 @@ print("[*] Connecting to Supabase database...")
 supabase = create_client(SUPABASE_URL, SUPABASE_KEY)
 
 def check_adb_device():
-    """Checks if there is an Android device connected via ADB."""
+    """Checks if there is an Android device connected via ADB using safe subprocess."""
     print("[*] Checking ADB device connection status...")
-    stream = os.popen('adb devices')
-    output = stream.read().strip().split('\n')
-    
-    # The first line is "List of devices attached", subsequent lines list devices
-    devices = [line for line in output[1:] if line.strip() and 'device' in line]
-    if not devices:
-        print("\n[!] Warning: No connected Android device found via ADB.")
-        print("[!] Make sure:")
-        print("    1. USB Debugging is enabled on your phone.")
-        print("    2. Your phone is connected to this computer via USB (or wireless ADB).")
-        print("    3. Running 'adb devices' lists your device.")
+    try:
+        res = subprocess.run(["adb", "devices"], capture_output=True, text=True, check=True)
+        output = res.stdout.strip().split('\n')
+        devices = [line for line in output[1:] if line.strip() and 'device' in line]
+        if not devices:
+            print("\n[!] Warning: No connected Android device found via ADB.")
+            print("[!] Make sure:")
+            print("    1. USB Debugging is enabled on your phone.")
+            print("    2. Your phone is connected to this computer via USB (or wireless ADB).")
+            print("    3. Running 'adb devices' lists your device.")
+            return False
+        print(f"[+] ADB connection verified! Device: {devices[0]}")
+        return True
+    except Exception as e:
+        print(f"[-] Failed to check adb devices: {e}")
         return False
-    print(f"[+] ADB connection verified! Device: {devices[0]}")
-    return True
 
-def run_adb_command(cmd):
-    """Executes an ADB shell command."""
-    full_cmd = f"adb {cmd}"
-    print(f"    Executing: {full_cmd}")
-    os.system(full_cmd)
+def run_adb_command(cmd_args):
+    """Executes an ADB command safely using subprocess list execution."""
+    if isinstance(cmd_args, str):
+        args = ["adb"] + shlex.split(cmd_args)
+    else:
+        args = ["adb"] + [str(x) for x in cmd_args]
+    
+    print(f"    Executing: {' '.join(args)}")
+    try:
+        subprocess.run(args, check=True, capture_output=True)
+        return True
+    except subprocess.CalledProcessError as e:
+        print(f"[-] ADB command failed (exit code {e.returncode}): {e.stderr.decode().strip()}")
+        return False
+    except Exception as e:
+        print(f"[-] ADB command execution error: {e}")
+        return False
 
 def download_image_locally(url, post_id):
     """Downloads a public image URL to a local temporary path."""
@@ -108,7 +124,7 @@ def process_pending_tweets():
             deep_link = f"twitter://post?message={encoded_content}"
 
             print("[*] Launching X (Twitter) compose window via deep link...")
-            run_adb_command(f'shell am start -a android.intent.action.VIEW -d "{deep_link}"')
+            run_adb_command(["shell", "am", "start", "-a", "android.intent.action.VIEW", "-d", deep_link])
             
             print("[*] Waiting 4 seconds for X interface to load...")
             time.sleep(4)
@@ -188,34 +204,41 @@ def process_queued_robotics_posts():
                                 print(f"[-] Direct copy failed for {path}: {e}")
                         if not copied:
                             print("[*] Direct copy failed, falling back to ADB push...")
-                            run_adb_command(f"push \"{local_path}\" {phone_img_path}")
+                            run_adb_command(["push", local_path, phone_img_path])
                             has_image = True
                         else:
                             has_image = True
                     else:
                         print("[*] Pushing image to Android device storage via ADB...")
-                        run_adb_command(f"push \"{local_path}\" {phone_img_path}")
+                        run_adb_command(["push", local_path, phone_img_path])
                         has_image = True
 
                     if has_image:
                         # Trigger media scan so X app sees it
-                        run_adb_command(f"shell am broadcast -a android.intent.action.MEDIA_SCANNER_SCAN_FILE -d file://{phone_img_path}")
+                        run_adb_command(["shell", "am", "broadcast", "-a", "android.intent.action.MEDIA_SCANNER_SCAN_FILE", "-d", f"file://{phone_img_path}"])
                         time.sleep(1)
 
             # Open intent
-            # If image exists, use android.intent.action.SEND to share both image and text
+            # If image exists, use android.intent.action.SEND with -t image/* to share both image and text
             # Otherwise use simple deep link compose
             if has_image:
                 print("[*] Launching X app via SEND intent (image + text)...")
-                # Format: adb shell am start -a android.intent.action.SEND --type "image/*" --es "android.intent.extra.TEXT" "text" --eu "android.intent.extra.STREAM" "file:///sdcard/..." com.twitter.android
-                # Escape double quotes in text
-                escaped_text = x_text.replace('"', '\\"')
-                run_adb_command(f'shell am start -a android.intent.action.SEND --type "image/*" --es "android.intent.extra.TEXT" "{escaped_text}" --eu "android.intent.extra.STREAM" "file://{phone_img_path}" --grant-read-uri-permission com.twitter.android')
+                # Using subprocess argument lists avoids shell newline expansion and commands splitting!
+                adb_args = [
+                    "shell", "am", "start",
+                    "-a", "android.intent.action.SEND",
+                    "-t", "image/*",
+                    "--es", "android.intent.extra.TEXT", x_text,
+                    "--eu", "android.intent.extra.STREAM", f"file://{phone_img_path}",
+                    "--grant-read-uri-permission",
+                    "com.twitter.android"
+                ]
+                run_adb_command(adb_args)
             else:
                 print("[*] Launching X composer via deep link (text only)...")
                 encoded_content = urllib.parse.quote(x_text)
                 deep_link = f"twitter://post?message={encoded_content}"
-                run_adb_command(f'shell am start -a android.intent.action.VIEW -d "{deep_link}"')
+                run_adb_command(["shell", "am", "start", "-a", "android.intent.action.VIEW", "-d", deep_link])
 
             # Wait for X composer layout to load
             print("[*] Waiting 5 seconds for X composer to display...")
@@ -228,7 +251,7 @@ def process_queued_robotics_posts():
 
             # Cleanup pushed image from phone
             if has_image:
-                run_adb_command(f"shell rm {phone_img_path}")
+                run_adb_command(["shell", "rm", phone_img_path])
 
             # Determine new status:
             # We want to check if the post was already posted on Reddit.
@@ -249,11 +272,6 @@ def process_queued_robotics_posts():
             # Cleanup local temp image
             if local_path and os.path.exists(local_path):
                 os.remove(local_path)
-
-def main():
-    print("=" * 60)
-    print("      Android Phone ADB Automator Daemon Active")
-    print("=" * 60)
     
     # Verify initial device status
     check_adb_device()
