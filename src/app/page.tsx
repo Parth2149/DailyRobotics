@@ -335,12 +335,14 @@ export default function Dashboard() {
     }
   };
 
-  // 3.8 Load an Inbox post into the Webhook Simulator
-  const handleLoadIntoSimulator = (post: Post) => {
+  // 3.8 Load an Inbox or Feed post into the Webhook Simulator
+  const handleLoadIntoSimulator = (post: Post, isInbox = true) => {
     setSimText(post.raw_spark_text);
     setFullDigestText(post.raw_spark_text);
-    setActiveInboxPostId(post.id);
+    setActiveInboxPostId(isInbox ? post.id : null);
     setShowSimulator(true);
+    // Smooth scroll to top of page where simulator resides
+    window.scrollTo({ top: 0, behavior: 'smooth' });
   };
 
   // 3.9 Extract a specific post from the raw email digest text currently in the simulator
@@ -837,9 +839,18 @@ export default function Dashboard() {
 
                 {/* Post Header with ID / Timestamp */}
                 <div className="flex items-center justify-between border-b border-slate-800/60 pb-3">
-                  <span className="text-[10px] font-bold font-mono text-slate-400 tracking-wider bg-slate-900 px-2 py-0.5 rounded border border-slate-800">
-                    ID: {post.id.slice(0, 8)}
-                  </span>
+                  <div className="flex items-center gap-2">
+                    <span className="text-[10px] font-bold font-mono text-slate-400 tracking-wider bg-slate-900 px-2 py-0.5 rounded border border-slate-800">
+                      ID: {post.id.slice(0, 8)}
+                    </span>
+                    <button
+                      onClick={() => handleLoadIntoSimulator(post, false)}
+                      className="text-[10px] font-bold text-slate-400 hover:text-cyan-400 flex items-center gap-1 bg-slate-900/80 hover:bg-slate-800 px-2.5 py-0.5 rounded border border-slate-800 transition-all duration-200 cursor-pointer hover:border-slate-700 active:scale-95"
+                      title="Load raw text back into Webhook Simulator"
+                    >
+                      <span>🔄 Load to Sim</span>
+                    </button>
+                  </div>
                   <span className="text-[10px] text-slate-500 font-medium">
                     {new Date(post.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
                   </span>
@@ -1067,14 +1078,23 @@ export default function Dashboard() {
                   <div key={post.id} className="w-full glass-panel rounded-3xl border border-slate-900/80 p-5 flex flex-col gap-4 hover:border-slate-800/80 transition-all group shadow-lg">
                     {/* Header: Date + Badges */}
                     <div className="flex items-center justify-between">
-                      <span className="text-[10px] font-mono text-slate-400">
-                        {new Date(post.created_at).toLocaleDateString(undefined, {
-                          month: 'short',
-                          day: 'numeric',
-                          hour: '2-digit',
-                          minute: '2-digit'
-                        })}
-                      </span>
+                      <div className="flex items-center gap-2">
+                        <span className="text-[10px] font-mono text-slate-400">
+                          {new Date(post.created_at).toLocaleDateString(undefined, {
+                            month: 'short',
+                            day: 'numeric',
+                            hour: '2-digit',
+                            minute: '2-digit'
+                          })}
+                        </span>
+                        <button
+                          onClick={() => handleLoadIntoSimulator(post, false)}
+                          className="text-[10px] font-bold text-slate-400 hover:text-cyan-400 flex items-center gap-1 bg-slate-900/80 hover:bg-slate-800 px-2.5 py-0.5 rounded border border-slate-800 transition-all duration-200 cursor-pointer hover:border-slate-700 active:scale-95"
+                          title="Load raw text back into Webhook Simulator"
+                        >
+                          <span>🔄 Load to Sim</span>
+                        </button>
+                      </div>
                       <div className="flex gap-1.5">
                         {postedToX && (
                           <span className="text-[9px] px-2 py-0.5 rounded-full bg-slate-900 border border-slate-800 font-bold text-slate-300">
