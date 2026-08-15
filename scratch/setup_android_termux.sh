@@ -6,13 +6,19 @@ echo "=========================================================="
 echo "    Termux DailyRobotics ADB Automator Setup"
 echo "=========================================================="
 
+# 0. Request storage permission (so Termux can write images to /sdcard/Download)
+echo "[*] Requesting Android storage permission..."
+echo "[*] Please tap 'Allow' when the Android popup appears."
+termux-setup-storage
+sleep 3
+
 # 1. Update Termux packages
 echo "[*] Updating Termux packages..."
 apt update && apt upgrade -y
 
-# 2. Install Git, Python, and required tools
-echo "[*] Installing Python, Git, and dependencies..."
-apt install git python ndk-sysroot clang make libffi -y
+# 2. Install Git, Python, ADB, and required tools
+echo "[*] Installing Python, Git, ADB, and dependencies..."
+apt install git python ndk-sysroot clang make libffi android-tools -y
 
 # 3. Clone the repository
 echo "[*] Cloning DailyRobotics repository from GitHub..."

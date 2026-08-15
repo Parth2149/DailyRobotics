@@ -171,13 +171,36 @@ def process_queued_robotics_posts():
                 print("[*] Downloading article image locally...")
                 local_path = download_image_locally(img_url, post_id)
                 if local_path and os.path.exists(local_path):
-                    print("[*] Pushing image to Android device storage...")
-                    run_adb_command(f"push \"{local_path}\" {phone_img_path}")
-                    time.sleep(1)
-                    # Trigger media scan so X app sees it
-                    run_adb_command(f"shell am broadcast -a android.intent.action.MEDIA_SCANNER_SCAN_FILE -d file://{phone_img_path}")
-                    time.sleep(1)
-                    has_image = True
+                    is_termux = os.path.exists('/data/data/com.termux')
+                    if is_termux:
+                        print("[*] Termux environment detected. Copying image directly to Android shared storage...")
+                        import shutil
+                        copied = False
+                        for path in ["/sdcard/Download/temp_tweet_img.png", "/storage/emulated/0/Download/temp_tweet_img.png"]:
+                            try:
+                                os.makedirs(os.path.dirname(path), exist_ok=True)
+                                shutil.copy(local_path, path)
+                                phone_img_path = path
+                                copied = True
+                                print(f"[+] Image copied directly to {path}!")
+                                break
+                            except Exception as e:
+                                print(f"[-] Direct copy failed for {path}: {e}")
+                        if not copied:
+                            print("[*] Direct copy failed, falling back to ADB push...")
+                            run_adb_command(f"push \"{local_path}\" {phone_img_path}")
+                            has_image = True
+                        else:
+                            has_image = True
+                    else:
+                        print("[*] Pushing image to Android device storage via ADB...")
+                        run_adb_command(f"push \"{local_path}\" {phone_img_path}")
+                        has_image = True
+
+                    if has_image:
+                        # Trigger media scan so X app sees it
+                        run_adb_command(f"shell am broadcast -a android.intent.action.MEDIA_SCANNER_SCAN_FILE -d file://{phone_img_path}")
+                        time.sleep(1)
 
             # Open intent
             # If image exists, use android.intent.action.SEND to share both image and text
