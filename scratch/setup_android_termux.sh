@@ -16,9 +16,9 @@ sleep 3
 echo "[*] Updating Termux packages..."
 apt update && apt upgrade -y
 
-# 2. Install Git, Python, ADB, Rust, and required compiler tools
-echo "[*] Installing Python, Git, ADB, Rust, and dependencies..."
-apt install git python ndk-sysroot clang make libffi android-tools rust -y
+# 2. Install Git, Python, ADB, Rust, and precompiled dependencies
+echo "[*] Installing Python, Git, ADB, Rust, and precompiled libraries..."
+apt install git python ndk-sysroot clang make libffi android-tools rust python-cryptography python-pydantic -y
 
 # 3. Clone the repository
 echo "[*] Cloning DailyRobotics repository from GitHub..."
