@@ -4,7 +4,7 @@ import { supabaseServer } from '@/lib/supabase';
 export async function POST(request: Request) {
   try {
     const body = await request.json();
-    const { postId, queueOnly } = body;
+    const { postId } = body;
 
     if (!postId) {
       return NextResponse.json({ error: 'postId is required' }, { status: 400 });
@@ -25,15 +25,11 @@ export async function POST(request: Request) {
     const { status } = post;
 
     // 2. Determine new status:
-    // If queueOnly, set to QUEUED_X so local ADB poller processes it.
-    // Otherwise: READY -> POSTED_X, POSTED_REDDIT -> POSTED_BOTH
-    let newStatus: string = 'POSTED_X';
-    if (queueOnly) {
-      newStatus = 'QUEUED_X';
-    } else {
-      if (status === 'POSTED_REDDIT' || status === 'POSTED_BOTH' || status === 'QUEUED_REDDIT') {
-        newStatus = 'POSTED_BOTH';
-      }
+    // READY -> POSTED_X
+    // POSTED_REDDIT -> POSTED_BOTH
+    let newStatus: 'POSTED_X' | 'POSTED_BOTH' = 'POSTED_X';
+    if (status === 'POSTED_REDDIT' || status === 'POSTED_BOTH') {
+      newStatus = 'POSTED_BOTH';
     }
 
     console.log(`[X API] Updating database record ${postId} status to ${newStatus}...`);
@@ -50,7 +46,7 @@ export async function POST(request: Request) {
     return NextResponse.json({
       success: true,
       status: newStatus,
-      message: queueOnly ? 'Queued for Android ADB posting.' : 'Successfully updated status to indicate X publication.',
+      message: 'Successfully updated status to indicate X publication.',
     });
   } catch (error: any) {
     console.error('[X API Error]:', error);
