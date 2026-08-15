@@ -435,7 +435,7 @@ export default function Dashboard() {
       });
 
       if (response.ok) {
-        alert('🚀 Sent to Android ADB queue! Make sure phone_post_bot.py is running on your computer.');
+        alert('🚀 Sent to Android ADB queue! Make sure phone_post_bot.py is running in Termux on your phone.');
         loadDashboardData();
       } else {
         const errData = await response.json();
