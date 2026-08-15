@@ -2,6 +2,7 @@ import os
 import sys
 import time
 import urllib.parse
+import requests
 from dotenv import load_dotenv
 
 # Try to import supabase library, notify user if missing
@@ -51,6 +52,22 @@ def run_adb_command(cmd):
     print(f"    Executing: {full_cmd}")
     os.system(full_cmd)
 
+def download_image_locally(url, post_id):
+    """Downloads a public image URL to a local temporary path."""
+    if not url:
+        return None
+    try:
+        temp_path = f"./temp_adb_img_{post_id[:8]}.png"
+        res = requests.get(url, stream=True, timeout=10)
+        if res.status_code == 200:
+            with open(temp_path, 'wb') as f:
+                for chunk in res:
+                    f.write(chunk)
+            return os.path.abspath(temp_path)
+    except Exception as e:
+        print(f"[-] Image download failed: {e}")
+    return None
+
 def process_pending_tweets():
     """Queries Supabase for pending tweets and processes them via Android ADB."""
     print("\n[*] Polling for pending tweets in database...")
@@ -62,7 +79,7 @@ def process_pending_tweets():
         return
 
     if not pending_list:
-        print("[+] No pending tweets found. Sleeping...")
+        print("[+] No pending tweets found.")
         return
 
     print(f"[+] Found {len(pending_list)} pending tweet(s) in queue!")
@@ -80,47 +97,139 @@ def process_pending_tweets():
         print(f"    Content: \"{content}\"")
 
         try:
-            # 1. Wake up the phone screen
-            print("[*] Waking up device screen...")
+            # Wake screen & unlock
             run_adb_command("shell input keyevent 224")
             time.sleep(1)
-
-            # 2. Unlock phone (Simulate drag up swipe in case lock screen requires it)
-            # If your device has a PIN/Password lock, you must unlock it manually first.
-            print("[*] Dismissing keyguard / swipe unlock...")
             run_adb_command("shell input swipe 500 1500 500 500 200")
             time.sleep(1)
 
-            # 3. URL-encode content for Twitter deep link schema
-            encoded_content = urllib.parse.quote(content)
             # Deep link syntax: twitter://post?message=TEXT
+            encoded_content = urllib.parse.quote(content)
             deep_link = f"twitter://post?message={encoded_content}"
 
             print("[*] Launching X (Twitter) compose window via deep link...")
             run_adb_command(f'shell am start -a android.intent.action.VIEW -d "{deep_link}"')
             
-            # Wait for X app to open and load the compose draft window
             print("[*] Waiting 4 seconds for X interface to load...")
             time.sleep(4)
 
-            # 4. Tap the 'Post' button (Simulates coordinate tap on top right compose area)
-            # Note: 950 150 is the default position for 1080p screens.
-            # Adjust these coordinates if your screen resolution or layout is different.
+            # Tap 'Post' button (top right: 950, 150)
             print("[*] Simulating screen tap to click 'Post' button...")
             run_adb_command("shell input tap 950 150")
             time.sleep(2)
 
-            # 5. Update status to 'posted' in Supabase to avoid double posting
-            print("[*] Updating tweet status to 'posted' in Supabase...")
+            # Update status in database
             supabase.table('pending_tweets').update({'status': 'posted'}).eq('id', tweet_id).execute()
-            print("[+] Successfully published tweet and updated status!")
+            print("[+] Successfully published tweet!")
 
         except Exception as ex:
             print(f"[-] Failed to process tweet {tweet_id}: {ex}")
 
+def process_queued_robotics_posts():
+    """Queries Supabase posts table for QUEUED_X posts and automates text + photo on Android."""
+    print("\n[*] Polling for QUEUED_X posts in database...")
+    try:
+        response = supabase.table('posts').select('*').eq('status', 'QUEUED_X').order('created_at').execute()
+        queued_list = response.data
+    except Exception as e:
+        print(f"[-] Database query failed: {e}")
+        return
+
+    if not queued_list:
+        print("[+] No QUEUED_X posts found.")
+        return
+
+    print(f"[+] Found {len(queued_list)} QUEUED_X post(s) to publish!")
+
+    # Ensure device is connected before starting
+    if not check_adb_device():
+        print("[-] Skipping execution until device is connected.")
+        return
+
+    for post in queued_list:
+        post_id = post['id']
+        x_text = post.get('x_post_text') or ""
+        img_url = post['image_url']
+        current_status = post['status']
+
+        print(f"\n[~] Automating Post ID: {post_id}")
+        print(f"    Text: \"{x_text[:60]}...\"")
+        print(f"    Image: {img_url}")
+
+        local_path = None
+        phone_img_path = "/sdcard/Download/temp_tweet_img.png"
+        try:
+            # Wake screen & unlock
+            run_adb_command("shell input keyevent 224")
+            time.sleep(1)
+            run_adb_command("shell input swipe 500 1500 500 500 200")
+            time.sleep(1)
+
+            # Download and push image if available
+            has_image = False
+            if img_url:
+                print("[*] Downloading article image locally...")
+                local_path = download_image_locally(img_url, post_id)
+                if local_path and os.path.exists(local_path):
+                    print("[*] Pushing image to Android device storage...")
+                    run_adb_command(f"push \"{local_path}\" {phone_img_path}")
+                    time.sleep(1)
+                    # Trigger media scan so X app sees it
+                    run_adb_command(f"shell am broadcast -a android.intent.action.MEDIA_SCANNER_SCAN_FILE -d file://{phone_img_path}")
+                    time.sleep(1)
+                    has_image = True
+
+            # Open intent
+            # If image exists, use android.intent.action.SEND to share both image and text
+            # Otherwise use simple deep link compose
+            if has_image:
+                print("[*] Launching X app via SEND intent (image + text)...")
+                # Format: adb shell am start -a android.intent.action.SEND --type "image/*" --es "android.intent.extra.TEXT" "text" --eu "android.intent.extra.STREAM" "file:///sdcard/..." com.twitter.android
+                # Escape double quotes in text
+                escaped_text = x_text.replace('"', '\\"')
+                run_adb_command(f'shell am start -a android.intent.action.SEND --type "image/*" --es "android.intent.extra.TEXT" "{escaped_text}" --eu "android.intent.extra.STREAM" "file://{phone_img_path}" --grant-read-uri-permission com.twitter.android')
+            else:
+                print("[*] Launching X composer via deep link (text only)...")
+                encoded_content = urllib.parse.quote(x_text)
+                deep_link = f"twitter://post?message={encoded_content}"
+                run_adb_command(f'shell am start -a android.intent.action.VIEW -d "{deep_link}"')
+
+            # Wait for X composer layout to load
+            print("[*] Waiting 5 seconds for X composer to display...")
+            time.sleep(5)
+
+            # Tap 'Post' button (top right: 950, 150)
+            print("[*] Simulating screen tap to click 'Post' button...")
+            run_adb_command("shell input tap 950 150")
+            time.sleep(2.5)
+
+            # Cleanup pushed image from phone
+            if has_image:
+                run_adb_command(f"shell rm {phone_img_path}")
+
+            # Determine new status:
+            # We want to check if the post was already posted on Reddit.
+            # If yes, update status to POSTED_BOTH. Else, set to POSTED_X.
+            new_status = 'POSTED_X'
+            # Fetch latest post data to ensure status is accurate
+            fresh_post = supabase.table('posts').select('status').eq('id', post_id).single().execute()
+            if fresh_post.data and (fresh_post.data['status'] == 'POSTED_REDDIT' or fresh_post.data['status'] == 'POSTED_BOTH'):
+                new_status = 'POSTED_BOTH'
+
+            print(f"[*] Updating post status to {new_status} in Supabase...")
+            supabase.table('posts').update({'status': new_status}).eq('id', post_id).execute()
+            print("[+] Successfully published post to Android X client!")
+
+        except Exception as ex:
+            print(f"[-] Failed to process robotics post {post_id}: {ex}")
+        finally:
+            # Cleanup local temp image
+            if local_path and os.path.exists(local_path):
+                os.remove(local_path)
+
 def main():
     print("=" * 60)
-    print("      Android Phone ADB Twitter Automator Daemon")
+    print("      Android Phone ADB Automator Daemon Active")
     print("=" * 60)
     
     # Verify initial device status
@@ -129,7 +238,10 @@ def main():
     # Loop infinitely checking database every 5 seconds
     while True:
         try:
+            # Process generic tweet inputs
             process_pending_tweets()
+            # Process structured Next.js dashboard posts
+            process_queued_robotics_posts()
         except KeyboardInterrupt:
             print("\n[+] Daemon stopped by user. Exiting.")
             break
@@ -140,3 +252,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+

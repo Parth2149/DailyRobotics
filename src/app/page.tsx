@@ -427,35 +427,50 @@ export default function Dashboard() {
     setPublishingX(prev => ({ ...prev, [post.id]: true }));
 
     try {
-      // A. Copy text to clipboard
-      try {
-        await navigator.clipboard.writeText(textToShare);
-      } catch (clipboardErr) {
-        console.error('Clipboard copy failed:', clipboardErr);
-      }
-
-      // B. Trigger image download only if image_url is available
-      if (post.image_url) {
-        const link = document.createElement('a');
-        link.href = post.image_url;
-        link.download = `robotics-image-${post.id.slice(0, 8)}.png`;
-        link.target = '_blank';
-        link.rel = 'noopener noreferrer';
-        document.body.appendChild(link);
-        link.click();
-        document.body.removeChild(link);
-      }
-
-      // C. Show custom guidance modal
-      setFallbackModal({
-        show: true,
-        platform: 'X',
-        text: textToShare,
-        imageUrl: post.image_url,
-        postId: post.id
+      console.log(`[X Share] Sending post ${post.id} to Android ADB queue...`);
+      const response = await fetch('/api/publish/x', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ postId: post.id, queueOnly: true })
       });
+
+      if (response.ok) {
+        alert('🚀 Sent to Android ADB queue! Make sure phone_post_bot.py is running on your computer.');
+        loadDashboardData();
+      } else {
+        const errData = await response.json();
+        console.warn('[X Share] ADB Queue failed, falling back to manual share modal:', errData.error || errData);
+        
+        // A. Copy text to clipboard
+        try {
+          await navigator.clipboard.writeText(textToShare);
+        } catch (clipboardErr) {
+          console.error('Clipboard copy failed:', clipboardErr);
+        }
+
+        // B. Trigger image download only if image_url is available
+        if (post.image_url) {
+          const link = document.createElement('a');
+          link.href = post.image_url;
+          link.download = `robotics-image-${post.id.slice(0, 8)}.png`;
+          link.target = '_blank';
+          link.rel = 'noopener noreferrer';
+          document.body.appendChild(link);
+          link.click();
+          document.body.removeChild(link);
+        }
+
+        // C. Show custom guidance modal
+        setFallbackModal({
+          show: true,
+          platform: 'X',
+          text: textToShare,
+          imageUrl: post.image_url,
+          postId: post.id
+        });
+      }
     } catch (err: any) {
-      console.warn('[X Share] Direct share failed:', err);
+      console.warn('[X Share] Queue request failed, falling back to manual share:', err);
     } finally {
       setPublishingX(prev => ({ ...prev, [post.id]: false }));
     }
