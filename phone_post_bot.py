@@ -272,6 +272,10 @@ def process_queued_robotics_posts():
             # Cleanup local temp image
             if local_path and os.path.exists(local_path):
                 os.remove(local_path)
+def main():
+    print("=" * 60)
+    print("      Android Phone ADB Automator Daemon Active")
+    print("=" * 60)
     
     # Verify initial device status
     check_adb_device()
